@@ -13,6 +13,7 @@ use App\Models\Product;
 use App\Models\Client;
 use App\Models\Prescription;
 use App\Models\Purchase;
+use Carbon\Carbon;
 
 class AdminController extends Controller
 {
@@ -26,34 +27,41 @@ class AdminController extends Controller
     }
 
     /**
-     * Show the admin dashboard.
+     * Show the admin dashboard with real data.
      */
     public function index()
     {
-        // Dashboard statistics
+        // Dashboard statistics with real data
         $stats = [
-            'sales_today' => Sale::whereDate('sale_date', today())->sum('total_amount'),
-            'clients_today' => Sale::whereDate('sale_date', today())->distinct('client_id')->count(),
+            'sales_today' => Sale::whereDate('sale_date', today())->sum('total_amount') ?? 0,
+            'sales_count_today' => Sale::whereDate('sale_date', today())->count(),
+            'clients_today' => Sale::whereDate('sale_date', today())->distinct('client_id')->count('client_id'),
+            'total_clients' => Client::count(),
             'products_low_stock' => Product::whereColumn('stock_quantity', '<=', 'stock_threshold')->count(),
-            'products_expiring' => Product::where('expiry_date', '<=', now()->addDays(30))->where('expiry_date', '>', now())->count(),
+            'products_expiring' => Product::where('expiry_date', '<=', now()->addDays(30))
+                                         ->where('expiry_date', '>', now())->count(),
             'prescriptions_pending' => Prescription::where('status', 'pending')->count(),
             'purchases_pending' => Purchase::where('status', 'pending')->count(),
             'total_users' => User::count(),
             'active_users' => User::where('is_active', true)->count(),
         ];
 
-        // Recent activities
+        // Recent activities (last 10)
         $recentActivities = ActivityLog::with('user')
             ->latest()
             ->take(10)
             ->get();
 
         // Sales chart data (last 7 days)
-        $salesChart = Sale::selectRaw('DATE(sale_date) as date, SUM(total_amount) as total')
-            ->where('sale_date', '>=', now()->subDays(6))
-            ->groupBy('date')
-            ->orderBy('date')
-            ->get();
+        $salesChart = collect();
+        for ($i = 6; $i >= 0; $i--) {
+            $date = now()->subDays($i);
+            $total = Sale::whereDate('sale_date', $date->format('Y-m-d'))->sum('total_amount') ?? 0;
+            $salesChart->push([
+                'date' => $date->format('Y-m-d'),
+                'total' => $total
+            ]);
+        }
 
         // User activity chart (last 30 days)
         $userActivityChart = ActivityLog::selectRaw('DATE(created_at) as date, COUNT(*) as count')
@@ -62,7 +70,36 @@ class AdminController extends Controller
             ->orderBy('date')
             ->get();
 
-        return view('admin.dashboard', compact('stats', 'recentActivities', 'salesChart', 'userActivityChart'));
+        // Low stock products for alerts
+        $lowStockProducts = Product::with(['category', 'supplier'])
+            ->whereColumn('stock_quantity', '<=', 'stock_threshold')
+            ->orderBy('stock_quantity', 'asc')
+            ->take(5)
+            ->get();
+
+        // Recent sales (last 10)
+        $recentSales = Sale::with(['client', 'user', 'saleItems.product'])
+            ->latest('sale_date')
+            ->take(10)
+            ->get();
+
+        // Products to order (low stock with suppliers)
+        $productsToOrder = Product::with(['supplier', 'category'])
+            ->whereColumn('stock_quantity', '<=', 'stock_threshold')
+            ->whereNotNull('supplier_id')
+            ->orderBy('stock_quantity', 'asc')
+            ->take(8)
+            ->get();
+
+        return view('admin.dashboard', compact(
+            'stats', 
+            'recentActivities', 
+            'salesChart', 
+            'userActivityChart',
+            'lowStockProducts',
+            'recentSales',
+            'productsToOrder'
+        ));
     }
 
     /**
@@ -75,7 +112,7 @@ class AdminController extends Controller
             'php_version' => phpversion(),
             'laravel_version' => app()->version(),
             'server_software' => $_SERVER['SERVER_SOFTWARE'] ?? 'Unknown',
-            'database_version' => DB::select('SELECT VERSION() as version')[0]->version ?? 'Unknown',
+            'database_version' => $this->getDatabaseVersion(),
             'disk_usage' => $this->getDiskUsage(),
             'memory_usage' => $this->getMemoryUsage(),
         ];
@@ -302,18 +339,39 @@ class AdminController extends Controller
     }
 
     /**
+     * Get database version
+     */
+    private function getDatabaseVersion()
+    {
+        try {
+            $version = DB::select('SELECT VERSION() as version')[0]->version ?? 'Unknown';
+            return $version;
+        } catch (\Exception $e) {
+            return 'Unknown';
+        }
+    }
+
+    /**
      * Get disk usage information
      */
     private function getDiskUsage()
     {
-        $bytes = disk_free_space(storage_path());
-        $total = disk_total_space(storage_path());
-        
-        return [
-            'free' => $this->formatBytes($bytes),
-            'total' => $this->formatBytes($total),
-            'used_percent' => round((($total - $bytes) / $total) * 100, 2)
-        ];
+        try {
+            $bytes = disk_free_space(storage_path());
+            $total = disk_total_space(storage_path());
+            
+            return [
+                'free' => $this->formatBytes($bytes),
+                'total' => $this->formatBytes($total),
+                'used_percent' => $total > 0 ? round((($total - $bytes) / $total) * 100, 2) : 0
+            ];
+        } catch (\Exception $e) {
+            return [
+                'free' => 'Unknown',
+                'total' => 'Unknown',
+                'used_percent' => 0
+            ];
+        }
     }
 
     /**
@@ -364,6 +422,7 @@ class AdminController extends Controller
             ->orderBy('count', 'desc')
             ->first();
     }
+
     /**
      * System status monitoring
      */
@@ -594,11 +653,15 @@ class AdminController extends Controller
      */
     private function getDiskUsagePercent()
     {
-        $diskTotal = disk_total_space(storage_path());
-        $diskFree = disk_free_space(storage_path());
-        $diskUsed = $diskTotal - $diskFree;
-        
-        return round(($diskUsed / $diskTotal) * 100, 1);
+        try {
+            $diskTotal = disk_total_space(storage_path());
+            $diskFree = disk_free_space(storage_path());
+            $diskUsed = $diskTotal - $diskFree;
+            
+            return $diskTotal > 0 ? round(($diskUsed / $diskTotal) * 100, 1) : 0;
+        } catch (\Exception $e) {
+            return 0;
+        }
     }
 
     /**
@@ -730,7 +793,7 @@ class AdminController extends Controller
         try {
             if ($request->enable) {
                 // Enable maintenance mode
-                Artisan::call('down', [
+                \Artisan::call('down', [
                     '--message' => $request->message ?? 'Application en maintenance',
                     '--retry' => $request->duration ? $request->duration * 60 : 3600
                 ]);
@@ -746,7 +809,7 @@ class AdminController extends Controller
                 $message = 'Mode maintenance activé avec succès.';
             } else {
                 // Disable maintenance mode
-                Artisan::call('up');
+                \Artisan::call('up');
                 
                 ActivityLog::logActivity(
                     'update',
@@ -769,10 +832,10 @@ class AdminController extends Controller
     public function clearCache()
     {
         try {
-            Artisan::call('cache:clear');
-            Artisan::call('config:clear');
-            Artisan::call('view:clear');
-            Artisan::call('route:clear');
+            \Artisan::call('cache:clear');
+            \Artisan::call('config:clear');
+            \Artisan::call('view:clear');
+            \Artisan::call('route:clear');
             
             ActivityLog::logActivity(
                 'update',
@@ -803,7 +866,7 @@ class AdminController extends Controller
             ActivityLog::where('created_at', '<', now()->subDays(90))->delete();
             
             // Clean expired password reset codes
-            PasswordResetCode::cleanExpired();
+            \App\Models\PasswordResetCode::cleanExpired();
             
             // In MySQL, you could run OPTIMIZE TABLE commands here
             // DB::statement('OPTIMIZE TABLE activity_logs');
@@ -915,9 +978,9 @@ class AdminController extends Controller
             $key = 'health_check_' . time();
             $value = 'test_value';
             
-            Cache::put($key, $value, 60);
-            $retrieved = Cache::get($key);
-            Cache::forget($key);
+            \Cache::put($key, $value, 60);
+            $retrieved = \Cache::get($key);
+            \Cache::forget($key);
             
             if ($retrieved === $value) {
                 return [
@@ -986,6 +1049,4 @@ class AdminController extends Controller
             ];
         }
     }
-    
-    
 }
