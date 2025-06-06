@@ -32,7 +32,25 @@ Route::get('/', function () {
     }
     return redirect()->route('login');
 });
-
+Route::middleware(['auth'])->group(function () {
+    // Notification routes
+    Route::prefix('notifications')->name('notifications.')->group(function () {
+        Route::get('/', [NotificationController::class, 'index'])->name('index');
+        Route::post('/{notification}/mark-read', [NotificationController::class, 'markAsRead'])->name('mark-read');
+        Route::post('/mark-all-read', [NotificationController::class, 'markAllAsRead'])->name('mark-all-read');
+        Route::delete('/{notification}', [NotificationController::class, 'destroy'])->name('destroy');
+        Route::delete('/read/delete', [NotificationController::class, 'deleteAllRead'])->name('delete-read');
+        Route::get('/recent', [NotificationController::class, 'getRecent'])->name('recent');
+        Route::get('/count', [NotificationController::class, 'getUnreadCount'])->name('count');
+        Route::get('/settings', [NotificationController::class, 'settings'])->name('settings');
+        Route::post('/settings', [NotificationController::class, 'updateSettings'])->name('settings.update');
+        
+        // Test route (only in local environment)
+        if (app()->environment('local')) {
+            Route::post('/test', [NotificationController::class, 'createTest'])->name('test');
+        }
+    });
+});
 // Authentication routes (sans middleware log.activity)
 Route::get('/login', [AuthController::class, 'showLoginForm'])->name('login');
 Route::post('/login', [AuthController::class, 'login']);
