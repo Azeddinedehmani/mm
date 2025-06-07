@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use App\Models\Client;
+use App\Models\ActivityLog;
 
 class ClientController extends Controller
 {
@@ -80,13 +81,37 @@ class ClientController extends Controller
                 ->withInput();
         }
 
-        $client = new Client();
-        $client->fill($request->all());
-        $client->active = $request->has('active');
-        $client->save();
+        try {
+            $client = new Client();
+            $client->fill($request->all());
+            $client->active = $request->has('active');
+            $client->save();
 
-        return redirect()->route('clients.index')
-            ->with('success', 'Client ajouté avec succès!');
+            // Log client creation
+            ActivityLog::logActivity(
+                'create',
+                "Client créé: {$client->full_name}",
+                $client,
+                null,
+                $client->toArray()
+            );
+
+            return redirect()->route('clients.index')
+                ->with('success', 'Client ajouté avec succès!');
+
+        } catch (\Exception $e) {
+            ActivityLog::logActivity(
+                'error',
+                "Erreur lors de la création du client: " . $e->getMessage(),
+                null,
+                null,
+                ['error_details' => $e->getMessage(), 'request_data' => $request->all()]
+            );
+            
+            return redirect()->back()
+                ->withErrors(['error' => 'Erreur lors de la création du client.'])
+                ->withInput();
+        }
     }
 
     /**
@@ -117,6 +142,9 @@ class ClientController extends Controller
      */
     public function update(Request $request, $id)
     {
+        $client = Client::findOrFail($id);
+        $oldValues = $client->toArray();
+
         $validator = Validator::make($request->all(), [
             'first_name' => 'required|string|max:255',
             'last_name' => 'required|string|max:255',
@@ -139,13 +167,34 @@ class ClientController extends Controller
                 ->withInput();
         }
 
-        $client = Client::findOrFail($id);
-        $client->fill($request->all());
-        $client->active = $request->has('active');
-        $client->save();
+        try {
+            $client->fill($request->all());
+            $client->active = $request->has('active');
+            $client->save();
 
-        return redirect()->route('clients.index')
-            ->with('success', 'Client mis à jour avec succès!');
+            // Log client update
+            ActivityLog::logActivity(
+                'update',
+                "Client modifié: {$client->full_name}",
+                $client,
+                $oldValues,
+                $client->toArray()
+            );
+
+            return redirect()->route('clients.index')
+                ->with('success', 'Client mis à jour avec succès!');
+
+        } catch (\Exception $e) {
+            ActivityLog::logActivity(
+                'error',
+                "Erreur lors de la modification du client {$client->full_name}: " . $e->getMessage(),
+                $client
+            );
+            
+            return redirect()->back()
+                ->withErrors(['error' => 'Erreur lors de la modification du client.'])
+                ->withInput();
+        }
     }
 
     /**
@@ -153,10 +202,48 @@ class ClientController extends Controller
      */
     public function destroy($id)
     {
-        $client = Client::findOrFail($id);
-        $client->delete();
+        try {
+            $client = Client::findOrFail($id);
+            $clientData = $client->toArray();
+            $clientName = $client->full_name;
+            
+            // Check if client has sales
+            if ($client->sales()->count() > 0) {
+                ActivityLog::logActivity(
+                    'unauthorized_access',
+                    "Tentative de suppression d'un client avec historique de ventes: {$clientName}",
+                    $client
+                );
+                
+                return redirect()->route('clients.index')
+                    ->withErrors(['error' => 'Impossible de supprimer un client qui a un historique de ventes.']);
+            }
+            
+            // Log deletion before actually deleting
+            ActivityLog::logActivity(
+                'delete',
+                "Client supprimé: {$clientName}",
+                null,
+                $clientData,
+                null
+            );
+            
+            $client->delete();
 
-        return redirect()->route('clients.index')
-            ->with('success', 'Client supprimé avec succès!');
+            return redirect()->route('clients.index')
+                ->with('success', 'Client supprimé avec succès!');
+
+        } catch (\Exception $e) {
+            ActivityLog::logActivity(
+                'error',
+                "Erreur lors de la suppression du client: " . $e->getMessage(),
+                null,
+                null,
+                ['client_id' => $id, 'error_details' => $e->getMessage()]
+            );
+            
+            return redirect()->route('clients.index')
+                ->withErrors(['error' => 'Erreur lors de la suppression du client.']);
+        }
     }
 }

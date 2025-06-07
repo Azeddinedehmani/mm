@@ -34,6 +34,8 @@ class Kernel extends HttpKernel
             \Illuminate\View\Middleware\ShareErrorsFromSession::class,
             \Illuminate\Foundation\Http\Middleware\ValidateCsrfToken::class,
             \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            // ADD ACTIVITY LOGGING TO ALL WEB ROUTES
+            \App\Http\Middleware\LogActivity::class,
         ],
 
         'api' => [

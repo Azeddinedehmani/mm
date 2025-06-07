@@ -9,10 +9,13 @@ use App\Models\Prescription;
 use App\Models\PrescriptionItem;
 use App\Models\Client;
 use App\Models\Product;
+use App\Models\ActivityLog;
 
 class PrescriptionController extends Controller
 {
-    public function __construct() { $this->middleware('auth'); }
+    public function __construct() { 
+        $this->middleware('auth'); 
+    }
 
     public function index(Request $request)
     {
@@ -111,12 +114,27 @@ class PrescriptionController extends Controller
                 ]);
             }
 
+            // Log prescription creation
+            ActivityLog::logTransaction('prescription', $prescription, 'create', [
+                'client_name' => $prescription->client->full_name,
+                'doctor_name' => $prescription->doctor_name,
+                'items_count' => count($request->items)
+            ]);
+
             DB::commit();
             return redirect()->route('prescriptions.show', $prescription->id)
                 ->with('success', 'Ordonnance créée avec succès!');
                 
         } catch (\Exception $e) {
             DB::rollback();
+            ActivityLog::logActivity(
+                'error',
+                "Erreur lors de la création d'une ordonnance: " . $e->getMessage(),
+                null,
+                null,
+                ['error_details' => $e->getMessage(), 'request_data' => $request->except('items')]
+            );
+            
             return redirect()->back()
                 ->withErrors(['error' => 'Erreur lors de la création de l\'ordonnance: ' . $e->getMessage()])
                 ->withInput();
@@ -147,6 +165,7 @@ class PrescriptionController extends Controller
     public function update(Request $request, $id)
     {
         $prescription = Prescription::findOrFail($id);
+        $oldValues = $prescription->toArray();
         
         if (in_array($prescription->status, ['completed', 'expired'])) {
             return redirect()->route('prescriptions.show', $prescription->id)
@@ -171,6 +190,11 @@ class PrescriptionController extends Controller
             'doctor_name', 'doctor_phone', 'doctor_speciality',
             'prescription_date', 'expiry_date', 'medical_notes', 'pharmacist_notes'
         ]));
+
+        // Log prescription update
+        ActivityLog::logTransaction('prescription', $prescription, 'update', [
+            'changes' => array_diff_assoc($prescription->toArray(), $oldValues)
+        ]);
 
         return redirect()->route('prescriptions.show', $prescription->id)
             ->with('success', 'Ordonnance mise à jour avec succès!');
@@ -216,6 +240,9 @@ class PrescriptionController extends Controller
         DB::beginTransaction();
         
         try {
+            $deliveredItems = [];
+            $stockChanges = [];
+            
             foreach ($request->items as $itemData) {
                 $prescriptionItem = PrescriptionItem::find($itemData['item_id']);
                 $quantityToDeliver = (int) $itemData['quantity_to_deliver'];
@@ -225,11 +252,32 @@ class PrescriptionController extends Controller
                     throw new \Exception("Quantité trop élevée pour {$prescriptionItem->product->name}. Maximum: {$maxQuantity}");
                 }
                 
-                $prescriptionItem->quantity_delivered += $quantityToDeliver;
-                $prescriptionItem->save();
-                
                 if ($quantityToDeliver > 0) {
+                    $oldStock = $prescriptionItem->product->stock_quantity;
+                    $prescriptionItem->quantity_delivered += $quantityToDeliver;
+                    $prescriptionItem->save();
+                    
                     $prescriptionItem->product->decrement('stock_quantity', $quantityToDeliver);
+                    $newStock = $prescriptionItem->product->fresh()->stock_quantity;
+                    
+                    // Log stock change
+                    ActivityLog::logStockChange(
+                        $prescriptionItem->product,
+                        $oldStock,
+                        $newStock,
+                        "Délivrance ordonnance #{$prescription->prescription_number}"
+                    );
+                    
+                    $deliveredItems[] = [
+                        'product_name' => $prescriptionItem->product->name,
+                        'quantity' => $quantityToDeliver
+                    ];
+                    
+                    $stockChanges[] = [
+                        'product_id' => $prescriptionItem->product->id,
+                        'old_stock' => $oldStock,
+                        'new_stock' => $newStock
+                    ];
                 }
             }
             
@@ -238,6 +286,13 @@ class PrescriptionController extends Controller
             }
             $prescription->updateStatus();
             
+            // Log delivery
+            ActivityLog::logTransaction('prescription', $prescription, 'deliver', [
+                'delivered_items' => $deliveredItems,
+                'stock_changes' => $stockChanges,
+                'pharmacist_notes' => $request->pharmacist_notes
+            ]);
+            
             DB::commit();
 
             return redirect()->route('prescriptions.show', $prescription->id)
@@ -245,6 +300,12 @@ class PrescriptionController extends Controller
                 
         } catch (\Exception $e) {
             DB::rollback();
+            ActivityLog::logActivity(
+                'error',
+                "Erreur lors de la délivrance de l'ordonnance #{$prescription->prescription_number}: " . $e->getMessage(),
+                $prescription
+            );
+            
             return redirect()->back()->withErrors(['error' => $e->getMessage()])->withInput();
         }
     }
@@ -252,6 +313,14 @@ class PrescriptionController extends Controller
     public function print($id)
     {
         $prescription = Prescription::with(['client', 'createdBy', 'prescriptionItems.product'])->findOrFail($id);
+        
+        // Log print action
+        ActivityLog::logActivity(
+            'print',
+            "Impression de l'ordonnance: {$prescription->prescription_number}",
+            $prescription
+        );
+        
         return view('prescriptions.print', compact('prescription'));
     }
 }

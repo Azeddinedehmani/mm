@@ -6,11 +6,11 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-
 use App\Models\Purchase;
 use App\Models\PurchaseItem;
 use App\Models\Supplier;
 use App\Models\Product;
+use App\Models\ActivityLog;
 
 class PurchaseController extends Controller
 {
@@ -150,6 +150,13 @@ class PurchaseController extends Controller
             
             $purchase->save();
 
+            // Log purchase creation
+            ActivityLog::logTransaction('purchase', $purchase, 'create', [
+                'supplier_name' => $purchase->supplier->name,
+                'total_amount' => $purchase->total_amount,
+                'products_count' => count($request->products)
+            ]);
+
             Log::info('Purchase created successfully', [
                 'purchase_id' => $purchase->id,
                 'purchase_number' => $purchase->purchase_number,
@@ -180,6 +187,14 @@ class PurchaseController extends Controller
                 
         } catch (\Exception $e) {
             DB::rollback();
+            
+            ActivityLog::logActivity(
+                'error',
+                "Erreur lors de la création d'une commande d'achat: " . $e->getMessage(),
+                null,
+                null,
+                ['error_details' => $e->getMessage(), 'request_data' => $request->all()]
+            );
             
             Log::error('Purchase creation failed', [
                 'error' => $e->getMessage(),
@@ -226,6 +241,7 @@ class PurchaseController extends Controller
     public function update(Request $request, $id)
     {
         $purchase = Purchase::findOrFail($id);
+        $oldValues = $purchase->toArray();
         
         if ($purchase->status === 'received') {
             return redirect()->route('purchases.show', $purchase->id)
@@ -245,6 +261,11 @@ class PurchaseController extends Controller
         }
 
         $purchase->update($request->only(['expected_date', 'notes', 'status']));
+
+        // Log purchase update
+        ActivityLog::logTransaction('purchase', $purchase, 'update', [
+            'changes' => array_diff_assoc($purchase->toArray(), $oldValues)
+        ]);
 
         return redirect()->route('purchases.show', $purchase->id)
             ->with('success', 'Commande mise à jour avec succès!');
@@ -296,6 +317,9 @@ class PurchaseController extends Controller
         DB::beginTransaction();
         
         try {
+            $receivedItems = [];
+            $stockChanges = [];
+            
             foreach ($request->items as $itemData) {
                 $purchaseItem = PurchaseItem::find($itemData['item_id']);
                 $quantityReceived = (int) $itemData['quantity_received'];
@@ -305,12 +329,33 @@ class PurchaseController extends Controller
                     throw new \Exception("Quantité trop élevée pour {$purchaseItem->product->name}. Maximum: {$maxQuantity}");
                 }
                 
-                $purchaseItem->quantity_received += $quantityReceived;
-                $purchaseItem->save();
-                
-                // Update product stock
                 if ($quantityReceived > 0) {
+                    $oldStock = $purchaseItem->product->stock_quantity;
+                    $purchaseItem->quantity_received += $quantityReceived;
+                    $purchaseItem->save();
+                    
+                    // Update product stock
                     $purchaseItem->product->increment('stock_quantity', $quantityReceived);
+                    $newStock = $purchaseItem->product->fresh()->stock_quantity;
+                    
+                    // Log stock change
+                    ActivityLog::logStockChange(
+                        $purchaseItem->product,
+                        $oldStock,
+                        $newStock,
+                        "Réception commande #{$purchase->purchase_number}"
+                    );
+                    
+                    $receivedItems[] = [
+                        'product_name' => $purchaseItem->product->name,
+                        'quantity' => $quantityReceived
+                    ];
+                    
+                    $stockChanges[] = [
+                        'product_id' => $purchaseItem->product->id,
+                        'old_stock' => $oldStock,
+                        'new_stock' => $newStock
+                    ];
                 }
             }
             
@@ -323,6 +368,13 @@ class PurchaseController extends Controller
             // Update purchase status
             $purchase->updateStatus();
             
+            // Log reception
+            ActivityLog::logTransaction('purchase', $purchase, 'receive', [
+                'received_items' => $receivedItems,
+                'stock_changes' => $stockChanges,
+                'notes' => $request->notes
+            ]);
+            
             DB::commit();
 
             return redirect()->route('purchases.show', $purchase->id)
@@ -330,6 +382,12 @@ class PurchaseController extends Controller
                 
         } catch (\Exception $e) {
             DB::rollback();
+            ActivityLog::logActivity(
+                'error',
+                "Erreur lors de la réception de la commande #{$purchase->purchase_number}: " . $e->getMessage(),
+                $purchase
+            );
+            
             return redirect()->back()->withErrors(['error' => $e->getMessage()])->withInput();
         }
     }
@@ -346,8 +404,18 @@ class PurchaseController extends Controller
                 ->withErrors(['error' => 'Impossible d\'annuler une commande déjà reçue.']);
         }
         
+        $oldStatus = $purchase->status;
         $purchase->status = 'cancelled';
         $purchase->save();
+        
+        // Log cancellation
+        ActivityLog::logActivity(
+            'cancel',
+            "Commande d'achat annulée: {$purchase->purchase_number}",
+            $purchase,
+            ['status' => $oldStatus],
+            ['status' => 'cancelled']
+        );
         
         return redirect()->route('purchases.show', $purchase->id)
             ->with('success', 'Commande annulée avec succès.');
@@ -359,6 +427,13 @@ class PurchaseController extends Controller
     public function print($id)
     {
         $purchase = Purchase::with(['supplier', 'user', 'purchaseItems.product'])->findOrFail($id);
+        
+        // Log print action
+        ActivityLog::logActivity(
+            'print',
+            "Impression du bon de commande: {$purchase->purchase_number}",
+            $purchase
+        );
         
         return view('purchases.print', compact('purchase'));
     }

@@ -70,19 +70,14 @@ class AuthController extends Controller
                 'last_login_ip' => $request->ip(),
             ]);
             
-            // Log successful login
-            ActivityLog::logActivity(
-                'login',
-                'Connexion réussie au système',
-                null,
-                null,
-                [
-                    'ip' => $request->ip(), 
-                    'user_agent' => $request->userAgent(),
-                    'remember' => $remember,
-                    'login_time' => now()->toDateTimeString()
-                ]
-            );
+            // Log successful login using ActivityLog
+            ActivityLog::logAuth('login', $user, [
+                'ip' => $request->ip(), 
+                'user_agent' => $request->userAgent(),
+                'remember' => $remember,
+                'login_time' => now()->toDateTimeString(),
+                'session_id' => session()->getId()
+            ]);
             
             Log::info('User logged in successfully', [
                 'user_id' => $user->id,
@@ -104,6 +99,16 @@ class AuthController extends Controller
                 'ip' => $request->ip(),
                 'user_agent' => $request->userAgent()
             ]);
+
+            // Try to find user for failed login logging
+            $user = User::where('email', $request->email)->first();
+            if ($user) {
+                ActivityLog::logAuth('failed_login', $user, [
+                    'ip' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                    'attempted_email' => $request->email
+                ]);
+            }
         }
 
         return redirect()->back()
@@ -156,6 +161,15 @@ class AuthController extends Controller
             'user_id' => $user->id,
             'ip' => $request->ip()
         ]);
+
+        // Log reset request activity
+        ActivityLog::logActivity(
+            'reset',
+            "Demande de réinitialisation de mot de passe pour: {$user->name}",
+            $user,
+            null,
+            ['ip' => $request->ip(), 'email' => $email]
+        );
 
         try {
             // Generate code
@@ -279,7 +293,15 @@ class AuthController extends Controller
             'password_changed_at' => now()
         ]);
 
-        // Log successful password reset (without logging in the user yet)
+        // Log successful password reset
+        ActivityLog::logActivity(
+            'reset',
+            "Mot de passe réinitialisé avec succès pour: {$user->name}",
+            $user,
+            null,
+            ['ip' => $request->ip(), 'reset_time' => now()->toDateTimeString()]
+        );
+
         Log::info('Password reset successful', [
             'user_id' => $user->id,
             'email' => $request->email,
@@ -302,23 +324,25 @@ class AuthController extends Controller
         if (auth()->check()) {
             $user = auth()->user();
             
-            ActivityLog::logActivity(
-                'logout',
-                'Déconnexion du système',
-                null,
-                null,
-                [
-                    'ip' => $request->ip(), 
-                    'user_agent' => $request->userAgent(),
-                    'logout_time' => now()->toDateTimeString(),
-                    'session_duration' => $user->last_login_at ? now()->diffInMinutes($user->last_login_at) . ' minutes' : 'unknown'
-                ]
-            );
+            // Calculate session duration
+            $sessionDuration = 'unknown';
+            if ($user->last_login_at) {
+                $sessionDuration = $user->last_login_at->diffInMinutes(now()) . ' minutes';
+            }
+            
+            ActivityLog::logAuth('logout', $user, [
+                'ip' => $request->ip(), 
+                'user_agent' => $request->userAgent(),
+                'logout_time' => now()->toDateTimeString(),
+                'session_duration' => $sessionDuration,
+                'session_id' => session()->getId()
+            ]);
             
             Log::info('User logged out', [
                 'user_id' => $user->id,
                 'email' => $user->email,
-                'ip' => $request->ip()
+                'ip' => $request->ip(),
+                'session_duration' => $sessionDuration
             ]);
         }
         

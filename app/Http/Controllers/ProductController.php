@@ -9,14 +9,12 @@ use Illuminate\Support\Facades\Log;
 use App\Models\Product;
 use App\Models\Category;
 use App\Models\Supplier;
-use App\Models\Notification;
+use App\Models\ActivityLog;
 
 class ProductController extends Controller
 {
     /**
      * Create a new controller instance.
-     *
-     * @return void
      */
     public function __construct()
     {
@@ -25,8 +23,6 @@ class ProductController extends Controller
 
     /**
      * Display a listing of the products.
-     *
-     * @return \Illuminate\Contracts\Support\Renderable
      */
     public function index(Request $request)
     {
@@ -70,23 +66,18 @@ class ProductController extends Controller
 
     /**
      * Show the form for creating a new product.
-     *
-     * @return \Illuminate\Contracts\Support\Renderable
      */
     public function create(Request $request)
     {
         $categories = Category::all();
-        $suppliers = Supplier::where('active', true)->get(); // Seuls les fournisseurs actifs
-        $selectedSupplierId = $request->get('supplier_id'); // Pré-sélection du fournisseur
+        $suppliers = Supplier::where('active', true)->get();
+        $selectedSupplierId = $request->get('supplier_id');
         
         return view('inventory.create', compact('categories', 'suppliers', 'selectedSupplierId'));
     }
 
     /**
      * Store a newly created product in storage.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\RedirectResponse
      */
     public function store(Request $request)
     {
@@ -122,35 +113,33 @@ class ProductController extends Controller
 
             $product->save();
 
-            // ========== IMMEDIATE NOTIFICATION CHECKS - ADDED ==========
-            try {
-                // Check if new product has low stock or is about to expire
-                if ($product->isLowStock()) {
-                    $this->createStockAlert($product);
-                }
+            // Log product creation
+            ActivityLog::logActivity(
+                'create',
+                "Produit ajouté à l'inventaire: {$product->name}",
+                $product,
+                null,
+                $product->toArray()
+            );
 
-                if ($product->expiry_date && $product->isAboutToExpire(30)) {
-                    $this->createExpiryAlert($product);
-                }
-
-                Log::info('Product created with immediate notification check', [
-                    'product_id' => $product->id,
-                    'is_low_stock' => $product->isLowStock(),
-                    'is_expiring' => $product->expiry_date ? $product->isAboutToExpire(30) : false
-                ]);
-
-            } catch (\Exception $notificationError) {
-                Log::warning('Notification creation failed after product creation', [
-                    'product_id' => $product->id,
-                    'error' => $notificationError->getMessage()
-                ]);
-            }
-            // ========== END IMMEDIATE NOTIFICATION CHECKS ==========
+            Log::info('Product created successfully', [
+                'product_id' => $product->id,
+                'product_name' => $product->name,
+                'created_by' => auth()->id()
+            ]);
 
             return redirect()->route('inventory.index')
                 ->with('success', 'Produit ajouté avec succès!');
 
         } catch (\Exception $e) {
+            ActivityLog::logActivity(
+                'error',
+                "Erreur lors de la création du produit: " . $e->getMessage(),
+                null,
+                null,
+                ['error_details' => $e->getMessage(), 'request_data' => $request->except('image')]
+            );
+            
             Log::error('Product creation failed', [
                 'error' => $e->getMessage(),
                 'request_data' => $request->except('image')
@@ -164,9 +153,6 @@ class ProductController extends Controller
 
     /**
      * Display the specified product.
-     *
-     * @param  int  $id
-     * @return \Illuminate\Contracts\Support\Renderable
      */
     public function show($id)
     {
@@ -176,9 +162,6 @@ class ProductController extends Controller
 
     /**
      * Show the form for editing the specified product.
-     *
-     * @param  int  $id
-     * @return \Illuminate\Contracts\Support\Renderable
      */
     public function edit($id)
     {
@@ -190,13 +173,12 @@ class ProductController extends Controller
 
     /**
      * Update the specified product in storage.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  int  $id
-     * @return \Illuminate\Http\RedirectResponse
      */
     public function update(Request $request, $id)
     {
+        $product = Product::findOrFail($id);
+        $oldValues = $product->toArray();
+
         $validator = Validator::make($request->all(), [
             'name' => 'required|string|max:255',
             'category_id' => 'required|exists:categories,id',
@@ -218,11 +200,8 @@ class ProductController extends Controller
         }
 
         try {
-            $product = Product::findOrFail($id);
-            
-            // Store old values for comparison
+            // Store old stock for logging
             $oldStock = $product->stock_quantity;
-            $oldExpiryDate = $product->expiry_date;
             $oldThreshold = $product->stock_threshold;
             
             $product->fill($request->except('image', 'prescription_required'));
@@ -240,41 +219,42 @@ class ProductController extends Controller
 
             $product->save();
 
-            // ========== IMMEDIATE NOTIFICATION CHECKS - ADDED ==========
-            try {
-                $stockChanged = ($oldStock != $product->stock_quantity || $oldThreshold != $product->stock_threshold);
-                $expiryChanged = ($oldExpiryDate != $product->expiry_date);
-
-                // Check stock level if it changed or if the product is now low stock
-                if ($stockChanged && $product->isLowStock()) {
-                    $this->createStockAlert($product);
-                }
-
-                // Check expiry date if it changed and product is about to expire
-                if ($expiryChanged && $product->expiry_date && $product->isAboutToExpire(30)) {
-                    $this->createExpiryAlert($product);
-                }
-
-                Log::info('Product updated with immediate notification check', [
-                    'product_id' => $product->id,
-                    'stock_changed' => $stockChanged,
-                    'expiry_changed' => $expiryChanged,
-                    'is_low_stock' => $product->isLowStock(),
-                    'is_expiring' => $product->expiry_date ? $product->isAboutToExpire(30) : false
-                ]);
-
-            } catch (\Exception $notificationError) {
-                Log::warning('Notification creation failed after product update', [
-                    'product_id' => $product->id,
-                    'error' => $notificationError->getMessage()
-                ]);
+            // Log stock changes if they occurred
+            if ($oldStock != $product->stock_quantity) {
+                ActivityLog::logStockChange(
+                    $product,
+                    $oldStock,
+                    $product->stock_quantity,
+                    'Modification manuelle du stock'
+                );
             }
-            // ========== END IMMEDIATE NOTIFICATION CHECKS ==========
+
+            // Log product update
+            ActivityLog::logActivity(
+                'update',
+                "Produit modifié: {$product->name}",
+                $product,
+                $oldValues,
+                $product->toArray()
+            );
+
+            Log::info('Product updated successfully', [
+                'product_id' => $product->id,
+                'product_name' => $product->name,
+                'updated_by' => auth()->id(),
+                'stock_changed' => $oldStock != $product->stock_quantity
+            ]);
 
             return redirect()->route('inventory.index')
                 ->with('success', 'Produit mis à jour avec succès!');
 
         } catch (\Exception $e) {
+            ActivityLog::logActivity(
+                'error',
+                "Erreur lors de la modification du produit {$product->name}: " . $e->getMessage(),
+                $product
+            );
+            
             Log::error('Product update failed', [
                 'product_id' => $id,
                 'error' => $e->getMessage()
@@ -288,20 +268,27 @@ class ProductController extends Controller
 
     /**
      * Remove the specified product from storage.
-     *
-     * @param  int  $id
-     * @return \Illuminate\Http\RedirectResponse
      */
     public function destroy($id)
     {
         try {
             $product = Product::findOrFail($id);
+            $productData = $product->toArray();
             $productName = $product->name;
             
             // Supprimer l'image si elle existe
             if ($product->image_path) {
                 Storage::disk('public')->delete($product->image_path);
             }
+            
+            // Log deletion before actually deleting
+            ActivityLog::logActivity(
+                'delete',
+                "Produit supprimé de l'inventaire: {$productName}",
+                null,
+                $productData,
+                null
+            );
             
             $product->delete();
 
@@ -315,6 +302,14 @@ class ProductController extends Controller
                 ->with('success', 'Produit supprimé avec succès!');
 
         } catch (\Exception $e) {
+            ActivityLog::logActivity(
+                'error',
+                "Erreur lors de la suppression du produit: " . $e->getMessage(),
+                null,
+                null,
+                ['product_id' => $id, 'error_details' => $e->getMessage()]
+            );
+            
             Log::error('Product deletion failed', [
                 'product_id' => $id,
                 'error' => $e->getMessage()
@@ -322,111 +317,6 @@ class ProductController extends Controller
             
             return redirect()->route('inventory.index')
                 ->withErrors(['error' => 'Erreur lors de la suppression du produit.']);
-        }
-    }
-
-    // ========== PRIVATE NOTIFICATION METHODS - ADDED ==========
-
-    /**
-     * Create stock alert notification
-     */
-    private function createStockAlert(Product $product)
-    {
-        try {
-            // Get all users (both admins and pharmacists should know about stock issues)
-            $users = \App\Models\User::where('is_active', true)->get();
-            
-            foreach ($users as $user) {
-                // Check if notification already exists for this product (within last hour)
-                $existingNotification = Notification::where('type', 'stock_alert')
-                    ->where('user_id', $user->id)
-                    ->where('data->product_id', $product->id)
-                    ->where('created_at', '>=', now()->subHour())
-                    ->first();
-
-                if (!$existingNotification) {
-                    Notification::create([
-                        'user_id' => $user->id,
-                        'type' => 'stock_alert',
-                        'title' => 'Stock critique détecté',
-                        'message' => "Le produit {$product->name} a un stock critique ({$product->stock_quantity} unités restantes, seuil: {$product->stock_threshold})",
-                        'data' => [
-                            'product_id' => $product->id,
-                            'current_stock' => $product->stock_quantity,
-                            'threshold' => $product->stock_threshold,
-                            'product_name' => $product->name
-                        ],
-                        'priority' => $product->stock_quantity <= 0 ? 'high' : 'medium',
-                        'action_url' => route('inventory.show', $product->id),
-                    ]);
-                }
-            }
-
-            Log::info('Stock alert notification created', [
-                'product_id' => $product->id,
-                'product_name' => $product->name,
-                'current_stock' => $product->stock_quantity,
-                'threshold' => $product->stock_threshold,
-                'user_count' => $users->count()
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Failed to create stock alert notification', [
-                'product_id' => $product->id,
-                'error' => $e->getMessage()
-            ]);
-        }
-    }
-
-    /**
-     * Create expiry alert notification
-     */
-    private function createExpiryAlert(Product $product)
-    {
-        try {
-            // Get all users
-            $users = \App\Models\User::where('is_active', true)->get();
-            $daysUntilExpiry = now()->diffInDays($product->expiry_date);
-            
-            foreach ($users as $user) {
-                // Check if notification already exists for this product (within last day)
-                $existingNotification = Notification::where('type', 'expiry_alert')
-                    ->where('user_id', $user->id)
-                    ->where('data->product_id', $product->id)
-                    ->where('created_at', '>=', now()->subDay())
-                    ->first();
-
-                if (!$existingNotification) {
-                    Notification::create([
-                        'user_id' => $user->id,
-                        'type' => 'expiry_alert',
-                        'title' => 'Produit bientôt expiré',
-                        'message' => "Le produit {$product->name} expire dans {$daysUntilExpiry} jours",
-                        'data' => [
-                            'product_id' => $product->id,
-                            'expiry_date' => $product->expiry_date->format('Y-m-d'),
-                            'days_until_expiry' => $daysUntilExpiry,
-                            'product_name' => $product->name
-                        ],
-                        'priority' => $daysUntilExpiry <= 7 ? 'high' : 'medium',
-                        'action_url' => route('inventory.show', $product->id),
-                    ]);
-                }
-            }
-
-            Log::info('Expiry alert notification created', [
-                'product_id' => $product->id,
-                'product_name' => $product->name,
-                'expiry_date' => $product->expiry_date,
-                'days_until_expiry' => $daysUntilExpiry,
-                'user_count' => $users->count()
-            ]);
-
-        } catch (\Exception $e) {
-            Log::error('Failed to create expiry alert notification', [
-                'product_id' => $product->id,
-                'error' => $e->getMessage()
-            ]);
         }
     }
 }
