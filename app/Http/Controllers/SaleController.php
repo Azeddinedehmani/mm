@@ -10,6 +10,7 @@ use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\Client;
 use App\Models\Product;
+use App\Models\Notification;
 
 class SaleController extends Controller
 {
@@ -203,6 +204,37 @@ class SaleController extends Controller
 
             DB::commit();
 
+            // ========== IMMEDIATE NOTIFICATION CHECKS - ADDED ==========
+            try {
+                // Check for significant sales (notify admins for sales >= 50€)
+                if ($sale->total_amount >= 50) {
+                    $this->createSaleNotification($sale);
+                }
+
+                // Check stock levels for all products in this sale
+                foreach ($productData as $item) {
+                    $product = $item['product']->fresh(); // Get updated product
+                    
+                    // Check if product is now low stock and notify immediately
+                    if ($product->isLowStock()) {
+                        $this->createStockAlert($product);
+                    }
+                }
+                
+                Log::info('Immediate notifications processed for sale', [
+                    'sale_id' => $sale->id,
+                    'products_checked' => count($productData)
+                ]);
+
+            } catch (\Exception $notificationError) {
+                // Log notification errors but don't fail the sale
+                Log::warning('Notification creation failed after sale', [
+                    'sale_id' => $sale->id,
+                    'error' => $notificationError->getMessage()
+                ]);
+            }
+            // ========== END IMMEDIATE NOTIFICATION CHECKS ==========
+
             return redirect()->route('sales.show', $sale->id)
                 ->with('success', 'Vente enregistrée avec succès!');
                 
@@ -354,5 +386,110 @@ class SaleController extends Controller
         $sale = Sale::with(['client', 'user', 'saleItems.product'])->findOrFail($id);
         
         return view('sales.print', compact('sale'));
+    }
+
+    // ========== PRIVATE NOTIFICATION METHODS - ADDED ==========
+
+    /**
+     * Create sale notification for significant sales
+     */
+    private function createSaleNotification(Sale $sale)
+    {
+        try {
+            // Get all admin users
+            $admins = \App\Models\User::where('role', 'responsable')->get();
+            
+            $clientName = $sale->client ? $sale->client->full_name : 'Client anonyme';
+            $userName = $sale->user ? $sale->user->name : 'Utilisateur';
+            
+            foreach ($admins as $admin) {
+                // Check if similar notification exists in last 30 minutes
+                $existingNotification = Notification::where('type', 'sale_created')
+                    ->where('user_id', $admin->id)
+                    ->where('data->sale_id', $sale->id)
+                    ->where('created_at', '>=', now()->subMinutes(30))
+                    ->first();
+
+                if (!$existingNotification) {
+                    Notification::create([
+                        'user_id' => $admin->id,
+                        'type' => 'sale_created',
+                        'title' => 'Nouvelle vente importante',
+                        'message' => "Vente #{$sale->sale_number} de {$sale->total_amount}€ pour {$clientName} par {$userName}",
+                        'data' => [
+                            'sale_id' => $sale->id,
+                            'amount' => $sale->total_amount,
+                            'client_name' => $clientName,
+                            'user_name' => $userName
+                        ],
+                        'priority' => $sale->total_amount >= 100 ? 'medium' : 'low',
+                        'action_url' => route('sales.show', $sale->id),
+                    ]);
+                }
+            }
+
+            Log::info('Sale notification created', [
+                'sale_id' => $sale->id,
+                'amount' => $sale->total_amount,
+                'admin_count' => $admins->count()
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to create sale notification', [
+                'sale_id' => $sale->id,
+                'error' => $e->getMessage()
+            ]);
+        }
+    }
+
+    /**
+     * Create stock alert notification
+     */
+    private function createStockAlert(Product $product)
+    {
+        try {
+            // Get all users (both admins and pharmacists should know about stock issues)
+            $users = \App\Models\User::where('is_active', true)->get();
+            
+            foreach ($users as $user) {
+                // Check if notification already exists for this product (within last hour)
+                $existingNotification = Notification::where('type', 'stock_alert')
+                    ->where('user_id', $user->id)
+                    ->where('data->product_id', $product->id)
+                    ->where('created_at', '>=', now()->subHour())
+                    ->first();
+
+                if (!$existingNotification) {
+                    Notification::create([
+                        'user_id' => $user->id,
+                        'type' => 'stock_alert',
+                        'title' => 'Stock critique détecté',
+                        'message' => "Le produit {$product->name} a un stock critique ({$product->stock_quantity} unités restantes, seuil: {$product->stock_threshold})",
+                        'data' => [
+                            'product_id' => $product->id,
+                            'current_stock' => $product->stock_quantity,
+                            'threshold' => $product->stock_threshold,
+                            'product_name' => $product->name
+                        ],
+                        'priority' => $product->stock_quantity <= 0 ? 'high' : 'medium',
+                        'action_url' => route('inventory.show', $product->id),
+                    ]);
+                }
+            }
+
+            Log::info('Stock alert notification created', [
+                'product_id' => $product->id,
+                'product_name' => $product->name,
+                'current_stock' => $product->stock_quantity,
+                'threshold' => $product->stock_threshold,
+                'user_count' => $users->count()
+            ]);
+
+        } catch (\Exception $e) {
+            Log::error('Failed to create stock alert notification', [
+                'product_id' => $product->id,
+                'error' => $e->getMessage()
+            ]);
+        }
     }
 }
