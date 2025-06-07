@@ -1,12 +1,12 @@
 @extends('layouts.app')
 
 @section('content')
-<div class="min-vh-100" style="background: linear-gradient(135deg,rgb(214, 221, 253) 0%,rgb(195, 214, 218) 100%); margin: -20px; padding: 20px;">
+<div class="min-vh-100" style="background: linear-gradient(135deg, #e3f2fd 0%, #e8f5e8 100%); margin: -20px; padding: 20px;">
     <!-- Header Section -->
     <div class="row mb-4">
         <div class="col-md-8">
             <div class="d-flex align-items-center">
-                <div class="me-3" style="width: 50px; height: 50px; background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%); border-radius: 15px; display: flex; align-items: center; justify-content: center;">
+                <div class="me-3" style="width: 50px; height: 50px; background: linear-gradient(180deg, #336699 0%, #4a90e2 100%); border-radius: 15px; display: flex; align-items: center; justify-content: center; box-shadow: 0 8px 25px rgba(51, 102, 153, 0.3);">
                     <i class="fas fa-cash-register text-white fa-lg"></i>
                 </div>
                 <div>
@@ -16,34 +16,34 @@
             </div>
         </div>
         <div class="col-md-4 text-end">
-            <a href="{{ route('sales.create') }}" class="btn text-white fw-semibold" style="background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%); border: none; border-radius: 12px; padding: 12px 24px; box-shadow: 0 4px 15px rgba(79, 172, 254, 0.3); transition: all 0.3s ease;">
+            <a href="{{ route('sales.create') }}" class="btn text-white fw-semibold" style="background: linear-gradient(180deg, #336699 0%, #4a90e2 100%); border: none; border-radius: 12px; padding: 12px 24px; box-shadow: 0 4px 15px rgba(51, 102, 153, 0.3); transition: all 0.3s ease;">
                 <i class="fas fa-plus me-1"></i> Nouvelle vente
             </a>
         </div>
     </div>
 
     @if(session('success'))
-        <div class="alert alert-success alert-dismissible fade show border-0" role="alert" style="border-radius: 15px; background: linear-gradient(45deg, #56ab2f 0%, #a8e6cf 100%); color: white;">
+        <div class="alert alert-success alert-dismissible fade show border-0" role="alert" style="border-radius: 15px; background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);">
             <i class="fas fa-check-circle me-2"></i>{{ session('success') }}
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
     @endif
 
     @if($errors->any())
-        <div class="alert alert-danger alert-dismissible fade show border-0" role="alert" style="border-radius: 15px; background: linear-gradient(45deg, #ff6b6b 0%, #ee5a52 100%); color: white;">
+        <div class="alert alert-danger alert-dismissible fade show border-0" role="alert" style="border-radius: 15px; background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);">
             <ul class="mb-0">
                 @foreach($errors->all() as $error)
                     <li>{{ $error }}</li>
                 @endforeach
             </ul>
-            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
         </div>
     @endif
 
     <!-- Statistiques -->
     <div class="row mb-4">
         <div class="col-md-3 mb-3">
-            <div class="card border-0 shadow-lg h-100" style="border-radius: 15px; background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%); color: white; transition: transform 0.3s ease;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+            <div class="card border-0 shadow-lg h-100" style="border-radius: 15px; background: linear-gradient(180deg, #336699 0%, #4a90e2 100%); color: white; transition: transform 0.3s ease;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
@@ -58,7 +58,7 @@
             </div>
         </div>
         <div class="col-md-3 mb-3">
-            <div class="card border-0 shadow-lg h-100" style="border-radius: 15px; background: linear-gradient(45deg, #667eea 0%, #764ba2 100%); color: white; transition: transform 0.3s ease;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+            <div class="card border-0 shadow-lg h-100" style="border-radius: 15px; background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; transition: transform 0.3s ease;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
@@ -73,7 +73,7 @@
             </div>
         </div>
         <div class="col-md-3 mb-3">
-            <div class="card border-0 shadow-lg h-100" style="border-radius: 15px; background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%); color: white; transition: transform 0.3s ease;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+            <div class="card border-0 shadow-lg h-100" style="border-radius: 15px; background: linear-gradient(135deg, #17a2b8 0%, #6f42c1 100%); color: white; transition: transform 0.3s ease;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
@@ -88,15 +88,15 @@
             </div>
         </div>
         <div class="col-md-3 mb-3">
-            <div class="card border-0 shadow-lg h-100" style="border-radius: 15px; background: linear-gradient(45deg, #a8edea 0%, #fed6e3 100%); color: #2c3e50; transition: transform 0.3s ease;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+            <div class="card border-0 shadow-lg h-100" style="border-radius: 15px; background: linear-gradient(135deg, #ffc107 0%, #fd7e14 100%); color: #212529; transition: transform 0.3s ease;" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center">
                         <div>
                             <h6 class="card-title opacity-75">Aujourd'hui</h6>
                             <h4 class="mb-0">{{ isset($sales) ? $sales->where('sale_date', '>=', today())->count() : 0 }}</h4>
                         </div>
-                        <div style="width: 50px; height: 50px; background: rgba(44, 62, 80, 0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
-                            <i class="fas fa-calendar-day fa-2x" style="color: #2c3e50;"></i>
+                        <div style="width: 50px; height: 50px; background: rgba(33, 37, 41, 0.15); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                            <i class="fas fa-calendar-day fa-2x" style="color: #212529;"></i>
                         </div>
                     </div>
                 </div>
@@ -106,9 +106,9 @@
 
     <!-- Filtres -->
     <div class="card mb-4 border-0 shadow-lg" style="border-radius: 15px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px);">
-        <div class="card-header border-0" style="background: linear-gradient(45deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 15px 15px 0 0;">
+        <div class="card-header border-0" style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 15px 15px 0 0;">
             <h5 class="card-title mb-0 fw-bold">
-                <i class="fas fa-filter me-2" style="color: #4facfe;"></i>
+                <i class="fas fa-filter me-2" style="color: #336699;"></i>
                 Filtres et recherche
             </h5>
         </div>
@@ -148,7 +148,7 @@
                     </select>
                 </div>
                 <div class="col-md-1 d-flex align-items-end">
-                    <button type="submit" class="btn w-100" style="background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%); color: white; border: none; border-radius: 10px; padding: 12px;">
+                    <button type="submit" class="btn w-100" style="background: linear-gradient(180deg, #336699 0%, #4a90e2 100%); color: white; border: none; border-radius: 10px; padding: 12px;">
                         <i class="fas fa-search"></i>
                     </button>
                 </div>
@@ -158,9 +158,9 @@
 
     <!-- Liste des ventes -->
     <div class="card border-0 shadow-lg" style="border-radius: 15px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px);">
-        <div class="card-header border-0" style="background: linear-gradient(45deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 15px 15px 0 0;">
+        <div class="card-header border-0" style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 15px 15px 0 0;">
             <h5 class="card-title mb-0 fw-bold">
-                <i class="fas fa-list me-2" style="color: #4facfe;"></i>
+                <i class="fas fa-list me-2" style="color: #336699;"></i>
                 Liste des ventes ({{ isset($sales) ? $sales->total() : 0 }})
             </h5>
         </div>
@@ -169,15 +169,15 @@
                 <table class="table table-hover mb-0">
                     <thead style="background-color: #f8f9fa;">
                         <tr>
-                            <th class="border-0 fw-semibold">N° Vente</th>
-                            <th class="border-0 fw-semibold">Client</th>
-                            <th class="border-0 fw-semibold">Vendeur</th>
-                            <th class="border-0 fw-semibold">Produits</th>
-                            <th class="border-0 fw-semibold">Montant</th>
-                            <th class="border-0 fw-semibold">Paiement</th>
-                            <th class="border-0 fw-semibold">Ordonnance</th>
-                            <th class="border-0 fw-semibold">Date</th>
-                            <th class="border-0 fw-semibold">Actions</th>
+                            <th class="border-0 fw-semibold" style="color: #336699;">N° Vente</th>
+                            <th class="border-0 fw-semibold" style="color: #336699;">Client</th>
+                            <th class="border-0 fw-semibold" style="color: #336699;">Vendeur</th>
+                            <th class="border-0 fw-semibold" style="color: #336699;">Produits</th>
+                            <th class="border-0 fw-semibold" style="color: #336699;">Montant</th>
+                            <th class="border-0 fw-semibold" style="color: #336699;">Paiement</th>
+                            <th class="border-0 fw-semibold" style="color: #336699;">Ordonnance</th>
+                            <th class="border-0 fw-semibold" style="color: #336699;">Date</th>
+                            <th class="border-0 fw-semibold" style="color: #336699;">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -185,7 +185,7 @@
                             <tr>
                                 <td class="border-0">
                                     <div class="d-flex align-items-center">
-                                        <div class="me-2" style="width: 32px; height: 32px; background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
+                                        <div class="me-2" style="width: 32px; height: 32px; background: linear-gradient(180deg, #336699 0%, #4a90e2 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center;">
                                             <i class="fas fa-receipt text-white small"></i>
                                         </div>
                                         <strong>{{ $sale->sale_number ?? 'N/A' }}</strong>
@@ -260,19 +260,26 @@
                                 </td>
                                 <td class="border-0">
                                     <div class="btn-group">
-                                        <a href="{{ route('sales.show', $sale->id) }}" class="btn btn-sm" style="background: linear-gradient(45deg, #667eea 0%, #764ba2 100%); color: white; border: none;" title="Voir">
+                                        <!-- Bouton Voir -->
+                                        <a href="{{ route('sales.show', $sale->id) }}" class="btn btn-sm" style="background: linear-gradient(180deg, #336699 0%, #4a90e2 100%); color: white; border: none;" title="Voir les détails">
                                             <i class="fas fa-eye"></i>
                                         </a>
-                                        <a href="{{ route('sales.print', $sale->id) }}" class="btn btn-sm btn-secondary" target="_blank" title="Imprimer">
+                                        
+                                        <!-- Bouton Imprimer -->
+                                        <a href="{{ route('sales.print', $sale->id) }}" class="btn btn-sm" style="background: linear-gradient(135deg, #6c757d 0%, #495057 100%); color: white; border: none;" target="_blank" title="Imprimer la facture">
                                             <i class="fas fa-print"></i>
                                         </a>
-                                        @if($sale->payment_status !== 'paid')
-                                            <a href="{{ route('sales.edit', $sale->id) }}" class="btn btn-sm" style="background: linear-gradient(45deg, #4facfe 0%, #00f2fe 100%); color: white; border: none;" title="Modifier">
+                                        
+                                        <!-- Bouton Modifier - NOUVEAU -->
+                                        @if($sale->payment_status !== 'paid' || Auth::user()->isAdmin())
+                                            <a href="{{ route('sales.edit', $sale->id) }}" class="btn btn-sm" style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; border: none;" title="Modifier la vente">
                                                 <i class="fas fa-edit"></i>
                                             </a>
                                         @endif
+                                        
+                                        <!-- Bouton Supprimer - seulement pour les admins et ventes récentes -->
                                         @if($sale->sale_date && $sale->sale_date >= now()->subDays(7) && Auth::user()->isAdmin())
-                                            <button type="button" class="btn btn-sm" style="background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%); color: white; border: none;" data-bs-toggle="modal" data-bs-target="#deleteModal{{ $sale->id }}" title="Supprimer">
+                                            <button type="button" class="btn btn-sm" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; border: none;" data-bs-toggle="modal" data-bs-target="#deleteModal{{ $sale->id }}" title="Supprimer la vente">
                                                 <i class="fas fa-trash"></i>
                                             </button>
                                         @endif
@@ -283,7 +290,7 @@
                                         <div class="modal fade" id="deleteModal{{ $sale->id }}" tabindex="-1">
                                             <div class="modal-dialog">
                                                 <div class="modal-content" style="border-radius: 15px; border: none;">
-                                                    <div class="modal-header" style="background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%); color: white; border-radius: 15px 15px 0 0;">
+                                                    <div class="modal-header" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; border-radius: 15px 15px 0 0;">
                                                         <h5 class="modal-title fw-bold">
                                                             <i class="fas fa-exclamation-triangle me-2"></i>
                                                             Confirmer la suppression
@@ -329,7 +336,7 @@
                                                         <form action="{{ route('sales.destroy', $sale->id) }}" method="POST" style="display: inline;">
                                                             @csrf
                                                             @method('DELETE')
-                                                            <button type="submit" class="btn text-white" style="background: linear-gradient(45deg, #f093fb 0%, #f5576c 100%); border: none; border-radius: 10px;">
+                                                            <button type="submit" class="btn text-white" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); border: none; border-radius: 10px;">
                                                                 <i class="fas fa-trash me-1"></i>Supprimer définitivement
                                                             </button>
                                                         </form>
@@ -343,7 +350,7 @@
                         @empty
                             <tr>
                                 <td colspan="9" class="text-center py-5 border-0">
-                                    <div class="mb-3" style="width: 60px; height: 60px; background: linear-gradient(45deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto;">
+                                    <div class="mb-3" style="width: 60px; height: 60px; background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto;">
                                         <i class="fas fa-inbox fa-2x text-muted"></i>
                                     </div>
                                     <h5 class="text-muted mb-2">Aucune vente trouvée</h5>
@@ -356,7 +363,7 @@
             </div>
         </div>
         @if(isset($sales) && $sales->hasPages())
-            <div class="card-footer border-0" style="background: linear-gradient(45deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 0 0 15px 15px;">
+            <div class="card-footer border-0" style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%); border-radius: 0 0 15px 15px;">
                 {{ $sales->appends(request()->query())->links() }}
             </div>
         @endif
@@ -387,15 +394,15 @@
     }
     
     .table-hover tbody tr:hover {
-        background-color: rgba(79, 172, 254, 0.05);
-        transform: scale(1.01);
+        background-color: rgba(51, 102, 153, 0.05);
+        transform: scale(1.005);
         transition: all 0.2s ease;
     }
     
     .form-control:focus,
     .form-select:focus {
-        border-color: #4facfe;
-        box-shadow: 0 0 0 0.2rem rgba(79, 172, 254, 0.25);
+        border-color: #336699;
+        box-shadow: 0 0 0 0.2rem rgba(51, 102, 153, 0.25);
     }
     
     .badge {
@@ -408,6 +415,15 @@
     
     .modal-content {
         box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+    }
+    
+    /* Harmonisation avec le sidebar */
+    .text-primary {
+        color: #336699 !important;
+    }
+    
+    .bg-primary {
+        background: linear-gradient(180deg, #336699 0%, #4a90e2 100%) !important;
     }
 </style>
 @endsection
