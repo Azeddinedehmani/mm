@@ -14,6 +14,8 @@ return new class extends Migration
         Schema::create('sales', function (Blueprint $table) {
             $table->id();
             $table->foreignId('client_id')->nullable()->constrained()->onDelete('set null');
+            $table->string('client_name_at_deletion')->nullable();
+            $table->json('deleted_client_data')->nullable();
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
             $table->string('sale_number')->unique();
             $table->decimal('subtotal', 10, 2)->default(0);
@@ -27,6 +29,11 @@ return new class extends Migration
             $table->text('notes')->nullable();
             $table->timestamp('sale_date');
             $table->timestamps();
+
+            // Indexes pour améliorer les performances
+            $table->index(['client_id', 'sale_date']);
+            $table->index(['payment_status', 'sale_date']);
+            $table->index('sale_date');
         });
     }
 

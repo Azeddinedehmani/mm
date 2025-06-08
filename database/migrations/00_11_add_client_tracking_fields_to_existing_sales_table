@@ -1,0 +1,61 @@
+<?php
+// Créez ce fichier avec: php artisan make:migration add_client_tracking_fields_to_existing_sales_table
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations.
+     */
+    public function up(): void
+    {
+        // Cette migration est pour les tables sales qui existent déjà sans ces champs
+        if (Schema::hasTable('sales')) {
+            Schema::table('sales', function (Blueprint $table) {
+                // Vérifier si les colonnes n'existent pas déjà
+                if (!Schema::hasColumn('sales', 'client_name_at_deletion')) {
+                    $table->string('client_name_at_deletion')->nullable()->after('client_id');
+                }
+                
+                if (!Schema::hasColumn('sales', 'deleted_client_data')) {
+                    $table->json('deleted_client_data')->nullable()->after('client_name_at_deletion');
+                }
+                
+                // Modifier la contrainte foreign key pour permettre SET NULL
+                if (Schema::hasColumn('sales', 'client_id')) {
+                    // Supprimer l'ancienne contrainte si elle existe
+                    $table->dropForeign(['client_id']);
+                    // Ajouter la nouvelle contrainte
+                    $table->foreign('client_id')->references('id')->on('clients')->onDelete('set null');
+                }
+            });
+        }
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        if (Schema::hasTable('sales')) {
+            Schema::table('sales', function (Blueprint $table) {
+                if (Schema::hasColumn('sales', 'client_name_at_deletion')) {
+                    $table->dropColumn('client_name_at_deletion');
+                }
+                
+                if (Schema::hasColumn('sales', 'deleted_client_data')) {
+                    $table->dropColumn('deleted_client_data');
+                }
+                
+                // Remettre l'ancienne contrainte si nécessaire
+                if (Schema::hasColumn('sales', 'client_id')) {
+                    $table->dropForeign(['client_id']);
+                    $table->foreign('client_id')->references('id')->on('clients')->onDelete('cascade');
+                }
+            });
+        }
+    }
+};
