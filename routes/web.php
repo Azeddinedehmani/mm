@@ -145,6 +145,7 @@ Route::middleware('auth')->group(function () {
             'update' => 'purchases.update',
             'destroy' => 'purchases.destroy'
         ]);
+        Route::delete('/purchases/{purchase}', [PurchaseController::class, 'destroy'])->name('purchases.destroy');
         
         Route::get('purchases/{id}/print', [PurchaseController::class, 'print'])->name('purchases.print');
         Route::get('purchases/{id}/receive', [PurchaseController::class, 'receive'])->name('purchases.receive');

@@ -13,8 +13,18 @@ return new class extends Migration
     {
         Schema::create('sales', function (Blueprint $table) {
             $table->id();
+            
+            // Client relation (nullable pour permettre les ventes orphelines)
             $table->foreignId('client_id')->nullable()->constrained()->onDelete('set null');
+            
+            // Colonnes pour garder trace du client supprimé
+            $table->string('client_name_at_deletion')->nullable();
+            $table->json('deleted_client_data')->nullable();
+            
+            // User relation (required)
             $table->foreignId('user_id')->constrained()->onDelete('cascade');
+            
+            // Sale details
             $table->string('sale_number')->unique();
             $table->decimal('subtotal', 10, 2)->default(0);
             $table->decimal('tax_amount', 10, 2)->default(0);
@@ -27,6 +37,12 @@ return new class extends Migration
             $table->text('notes')->nullable();
             $table->timestamp('sale_date');
             $table->timestamps();
+            
+            // Index pour optimiser les requêtes
+            $table->index(['client_id'], 'idx_sales_client_id');
+            $table->index(['client_name_at_deletion'], 'idx_sales_deleted_client');
+            $table->index(['sale_date'], 'idx_sales_date');
+            $table->index(['payment_status'], 'idx_sales_payment_status');
         });
     }
 

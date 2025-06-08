@@ -29,6 +29,16 @@
         </div>
     @endif
 
+    @if($errors->any())
+        <div class="alert alert-danger alert-dismissible fade show border-0" role="alert" style="border-radius: 15px; background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            @foreach($errors->all() as $error)
+                {{ $error }}<br>
+            @endforeach
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+    @endif
+
     <!-- Statistiques -->
     <div class="row mb-4">
         <div class="col-md-3 mb-3">
@@ -268,6 +278,13 @@
                                                 <i class="fas fa-truck"></i>
                                             </a>
                                         @endif
+
+                                        @if($purchase->status === 'pending' || $purchase->status === 'cancelled')
+                                            <!-- Bouton Supprimer -->
+                                            <button type="button" class="btn btn-sm" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; border: none;" title="Supprimer la commande" onclick="confirmDelete({{ $purchase->id }}, '{{ $purchase->purchase_number }}')">
+                                                <i class="fas fa-trash"></i>
+                                            </button>
+                                        @endif
                                     </div>
                                 </td>
                             </tr>
@@ -293,6 +310,44 @@
         @endif
     </div>
 </div>
+
+<!-- Modal de confirmation de suppression -->
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1" aria-labelledby="deleteConfirmModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content" style="border-radius: 15px; border: none; box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);">
+            <div class="modal-header border-0" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; border-radius: 15px 15px 0 0;">
+                <h5 class="modal-title fw-bold" id="deleteConfirmModalLabel">
+                    <i class="fas fa-exclamation-triangle me-2"></i>
+                    Confirmer la suppression
+                </h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center py-4">
+                <div class="mb-3" style="width: 60px; height: 60px; background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); border-radius: 50%; display: flex; align-items: center; justify-content: center; margin: 0 auto;">
+                    <i class="fas fa-trash fa-2x text-white"></i>
+                </div>
+                <h5 class="mb-3">Êtes-vous sûr de vouloir supprimer cette commande ?</h5>
+                <p class="text-muted mb-0">
+                    Commande: <strong id="purchaseNumber"></strong><br>
+                    <small class="text-danger">Cette action est irréversible.</small>
+                </p>
+            </div>
+            <div class="modal-footer border-0 justify-content-center">
+                <button type="button" class="btn btn-secondary me-2" data-bs-dismiss="modal" style="border-radius: 10px; padding: 10px 20px;">
+                    <i class="fas fa-times me-1"></i> Annuler
+                </button>
+                <form id="deleteForm" method="POST" style="display: inline;">
+                    @csrf
+                    @method('DELETE')
+                    <button type="submit" class="btn text-white" style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); border: none; border-radius: 10px; padding: 10px 20px;">
+                        <i class="fas fa-trash me-1"></i> Supprimer
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
 @endsection
 
 @section('styles')
@@ -348,5 +403,40 @@
     .progress {
         background-color: rgba(51, 102, 153, 0.1);
     }
+
+    .modal-content {
+        backdrop-filter: blur(10px);
+    }
+
+    .btn-group .btn {
+        margin-right: 2px;
+    }
+
+    .btn-group .btn:last-child {
+        margin-right: 0;
+    }
 </style>
+@endsection
+
+@section('scripts')
+<script>
+function confirmDelete(purchaseId, purchaseNumber) {
+    document.getElementById('purchaseNumber').textContent = purchaseNumber;
+    document.getElementById('deleteForm').action = '/purchases/' + purchaseId;
+    
+    const deleteModal = new bootstrap.Modal(document.getElementById('deleteConfirmModal'));
+    deleteModal.show();
+}
+
+// Auto-hide alerts after 5 seconds
+document.addEventListener('DOMContentLoaded', function() {
+    const alerts = document.querySelectorAll('.alert');
+    alerts.forEach(function(alert) {
+        setTimeout(function() {
+            const bsAlert = new bootstrap.Alert(alert);
+            bsAlert.close();
+        }, 5000);
+    });
+});
+</script>
 @endsection

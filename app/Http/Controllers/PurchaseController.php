@@ -31,32 +31,34 @@ class PurchaseController extends Controller
         $query = Purchase::with(['supplier', 'user', 'purchaseItems.product']);
 
         // Search functionality
-        if ($request->has('search') && !empty($request->search)) {
-            $search = $request->search;
+        if ($request->filled('search')) {
+            $search = trim($request->search);
             $query->where(function($q) use ($search) {
                 $q->where('purchase_number', 'like', "%{$search}%")
                   ->orWhereHas('supplier', function($supplierQuery) use ($search) {
-                      $supplierQuery->where('name', 'like', "%{$search}%");
-                  });
+                      $supplierQuery->where('name', 'like', "%{$search}%")
+                                   ->orWhere('contact_person', 'like', "%{$search}%");
+                  })
+                  ->orWhere('notes', 'like', "%{$search}%");
             });
         }
 
-        // Filter by status
-        if ($request->has('status') && $request->status !== '') {
+        // Filter by status - Fixed the logic
+        if ($request->filled('status')) {
             $query->where('status', $request->status);
         }
 
         // Filter by supplier
-        if ($request->has('supplier') && $request->supplier !== '') {
+        if ($request->filled('supplier')) {
             $query->where('supplier_id', $request->supplier);
         }
 
         // Filter by date range
-        if ($request->has('date_from') && !empty($request->date_from)) {
+        if ($request->filled('date_from')) {
             $query->whereDate('order_date', '>=', $request->date_from);
         }
         
-        if ($request->has('date_to') && !empty($request->date_to)) {
+        if ($request->filled('date_to')) {
             $query->whereDate('order_date', '<=', $request->date_to);
         }
 
@@ -70,7 +72,7 @@ class PurchaseController extends Controller
                               ->count();
         $receivedCount = Purchase::where('status', 'received')->count();
         
-        $suppliers = Supplier::where('active', true)->get();
+        $suppliers = Supplier::where('active', true)->orderBy('name')->get();
         
         return view('purchases.index', compact(
             'purchases', 'totalPurchases', 'pendingCount', 'overdueCount', 'receivedCount', 'suppliers'
@@ -399,6 +401,68 @@ class PurchaseController extends Controller
             return redirect()->back()
                 ->withErrors(['error' => 'Erreur lors de la mise à jour de la commande.'])
                 ->withInput();
+        }
+    }
+
+    /**
+     * Remove the specified purchase from storage.
+     */
+    public function destroy($id)
+    {
+        try {
+            $purchase = Purchase::with(['purchaseItems'])->findOrFail($id);
+            
+            // Check if purchase can be deleted
+            if ($purchase->status === 'received') {
+                return redirect()->route('purchases.index')
+                    ->withErrors(['error' => 'Impossible de supprimer une commande reçue.']);
+            }
+            
+            if ($purchase->status === 'partially_received') {
+                return redirect()->route('purchases.index')
+                    ->withErrors(['error' => 'Impossible de supprimer une commande partiellement reçue.']);
+            }
+            
+            DB::beginTransaction();
+            
+            // Store purchase info for logging before deletion
+            $purchaseInfo = [
+                'purchase_number' => $purchase->purchase_number,
+                'supplier_name' => $purchase->supplier->name,
+                'total_amount' => $purchase->total_amount,
+                'status' => $purchase->status
+            ];
+            
+            // Delete purchase items first
+            $purchase->purchaseItems()->delete();
+            
+            // Delete the purchase
+            $purchase->delete();
+            
+            // Log deletion
+            ActivityLog::logActivity(
+                'delete',
+                "Commande d'achat supprimée: {$purchaseInfo['purchase_number']} - Fournisseur: {$purchaseInfo['supplier_name']} - Montant: {$purchaseInfo['total_amount']}€",
+                null,
+                $purchaseInfo,
+                null
+            );
+            
+            DB::commit();
+            
+            return redirect()->route('purchases.index')
+                ->with('success', 'Commande supprimée avec succès.');
+                
+        } catch (\Exception $e) {
+            DB::rollback();
+            
+            Log::error('Purchase deletion failed', [
+                'purchase_id' => $id,
+                'error' => $e->getMessage()
+            ]);
+            
+            return redirect()->route('purchases.index')
+                ->withErrors(['error' => 'Erreur lors de la suppression de la commande.']);
         }
     }
 
