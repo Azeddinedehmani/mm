@@ -16,6 +16,11 @@ class LogActivity
     {
         $response = $next($request);
 
+        // Skip logging for auth routes and certain conditions
+        if ($this->shouldSkipLogging($request, $response)) {
+            return $response;
+        }
+
         // Only log for authenticated users and successful requests
         if (auth()->check() && $response->getStatusCode() < 400) {
             $this->logActivity($request, $response);
@@ -25,64 +30,114 @@ class LogActivity
     }
 
     /**
-     * Log the activity
+     * Determine if logging should be skipped
      */
-    private function logActivity(Request $request, Response $response)
+    private function shouldSkipLogging(Request $request, Response $response): bool
     {
-        $method = $request->method();
-        $route = $request->route();
-        $routeName = $route ? $route->getName() : null;
         $uri = $request->getRequestUri();
+        $routeName = $request->route() ? $request->route()->getName() : null;
 
-        // Skip logging for certain routes to avoid noise
+        // Skip auth-related routes
+        $authRoutes = [
+            '/login',
+            '/logout', 
+            '/forgot-password',
+            '/reset-password',
+            'login',
+            'logout',
+            'password.forgot',
+            'password.send.code',
+            'password.reset.form',
+            'password.reset'
+        ];
+
+        // Skip if it's an auth route
+        if (in_array($uri, $authRoutes) || in_array($routeName, $authRoutes)) {
+            return true;
+        }
+
+        // Skip if URL contains auth patterns
+        if (str_contains($uri, '/login') || 
+            str_contains($uri, '/logout') || 
+            str_contains($uri, '/forgot-password') || 
+            str_contains($uri, '/reset-password')) {
+            return true;
+        }
+
+        // Skip AJAX requests for notifications and API calls
         $skipRoutes = [
             'notifications.recent',
             'notifications.count',
             'sales.get-product',
         ];
 
-        // Skip AJAX requests for notifications and API calls
         if (in_array($routeName, $skipRoutes) || 
             str_contains($uri, '/api/') || 
-            $request->ajax() && str_contains($uri, 'notification')) {
-            return;
+            ($request->ajax() && str_contains($uri, 'notification'))) {
+            return true;
         }
 
-        // Determine action based on HTTP method and route
-        $action = $this->determineAction($method, $routeName, $uri);
-        $description = $this->generateDescription($action, $routeName, $request);
+        // Skip asset requests
+        if (str_contains($uri, '/css/') || 
+            str_contains($uri, '/js/') || 
+            str_contains($uri, '/images/') ||
+            str_contains($uri, '/favicon.ico')) {
+            return true;
+        }
 
-        // Extract model information if available
-        $modelType = null;
-        $modelId = null;
-        
-        if ($route) {
-            $parameters = $route->parameters();
+        // Skip if user is not authenticated (except for specific public routes)
+        if (!auth()->check()) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Log the activity
+     */
+    private function logActivity(Request $request, Response $response)
+    {
+        try {
+            $method = $request->method();
+            $route = $request->route();
+            $routeName = $route ? $route->getName() : null;
+            $uri = $request->getRequestUri();
+
+            // Determine action based on HTTP method and route
+            $action = $this->determineAction($method, $routeName, $uri);
+            $description = $this->generateDescription($action, $routeName, $request);
+
+            // Extract model information if available
+            $modelType = null;
+            $modelId = null;
             
-            // Try to identify the main model from route parameters
-            $modelMappings = [
-                'product' => 'App\Models\Product',
-                'inventory' => 'App\Models\Product',
-                'client' => 'App\Models\Client',
-                'sale' => 'App\Models\Sale',
-                'prescription' => 'App\Models\Prescription',
-                'purchase' => 'App\Models\Purchase',
-                'supplier' => 'App\Models\Supplier',
-                'user' => 'App\Models\User',
-                'notification' => 'App\Models\Notification',
-            ];
-            
-            foreach ($modelMappings as $param => $model) {
-                if (isset($parameters[$param])) {
-                    $modelType = $model;
-                    $modelId = $parameters[$param];
-                    break;
+            if ($route) {
+                $parameters = $route->parameters();
+                
+                // Try to identify the main model from route parameters
+                $modelMappings = [
+                    'product' => 'App\Models\Product',
+                    'inventory' => 'App\Models\Product',
+                    'client' => 'App\Models\Client',
+                    'sale' => 'App\Models\Sale',
+                    'prescription' => 'App\Models\Prescription',
+                    'purchase' => 'App\Models\Purchase',
+                    'supplier' => 'App\Models\Supplier',
+                    'user' => 'App\Models\User',
+                    'notification' => 'App\Models\Notification',
+                ];
+                
+                foreach ($modelMappings as $param => $model) {
+                    if (isset($parameters[$param])) {
+                        $modelType = $model;
+                        $modelId = $parameters[$param];
+                        break;
+                    }
                 }
             }
-        }
 
-        // Create activity log safely
-        try {
+            // Create activity log
             ActivityLog::create([
                 'user_id' => auth()->id(),
                 'action' => $action,
@@ -92,9 +147,15 @@ class LogActivity
                 'ip_address' => $request->ip(),
                 'user_agent' => $request->userAgent(),
             ]);
+
         } catch (\Exception $e) {
             // Silently fail to prevent breaking the application
-            \Log::error('Failed to log activity: ' . $e->getMessage());
+            \Log::error('Failed to log activity: ' . $e->getMessage(), [
+                'uri' => $request->getRequestUri(),
+                'method' => $request->method(),
+                'user_id' => auth()->id(),
+                'error' => $e->getMessage()
+            ]);
         }
     }
 
@@ -232,6 +293,12 @@ class LogActivity
             'admin.activity-logs' => 'Consultation des logs d\'activité',
             'admin.export-activity-logs' => 'Export des logs d\'activité',
             'admin.clear-old-logs' => 'Nettoyage des anciens logs',
+            'admin.system-status' => 'Consultation du statut système',
+            'admin.performance-metrics' => 'Consultation des métriques de performance',
+            'admin.health-check' => 'Vérification de santé du système',
+            'admin.toggle-maintenance' => 'Basculement du mode maintenance',
+            'admin.clear-cache' => 'Vidage du cache',
+            'admin.optimize-database' => 'Optimisation de la base de données',
             
             // Pharmacist Dashboard
             'pharmacist.dashboard' => 'Consultation du tableau de bord pharmacien',
@@ -276,6 +343,8 @@ class LogActivity
                 'suppliers' => 'fournisseur',
                 'users' => 'utilisateur',
                 'notifications' => 'notification',
+                'dashboard' => 'tableau de bord',
+                'home' => 'accueil',
             ];
             
             $actionNames = [
@@ -286,6 +355,8 @@ class LogActivity
                 'edit' => 'affichage du formulaire de modification de',
                 'update' => 'modification d\'un',
                 'destroy' => 'suppression d\'un',
+                'export' => 'export de',
+                'print' => 'impression de',
             ];
             
             $resourceName = $resourceNames[$resource] ?? $resource;

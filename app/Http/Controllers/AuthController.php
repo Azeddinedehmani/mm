@@ -30,13 +30,16 @@ class AuthController extends Controller
      */
     public function showLoginForm()
     {
+        // Clear any existing flash messages that might interfere
+        session()->forget(['errors', 'message']);
+        
         return view('auth.login');
     }
 
     /**
      * Handle login request
      */
-     public function login(Request $request)
+    public function login(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'email' => 'required|email',
@@ -52,7 +55,34 @@ class AuthController extends Controller
         $credentials = $request->only('email', 'password');
         $remember = $request->has('remember');
 
-        // NOUVELLE MÉTHODE: Inclure is_active dans les credentials
+        // Check if user exists first
+        $user = User::where('email', $credentials['email'])->first();
+        
+        if (!$user) {
+            return redirect()->back()
+                ->withErrors(['email' => 'Aucun compte trouvé avec cette adresse email.'])
+                ->withInput();
+        }
+
+        // Check if user is active
+        if (!$user->is_active) {
+            // Log failed login for inactive user
+            try {
+                ActivityLog::logAuth('failed_login_inactive', $user, [
+                    'ip' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                    'reason' => 'account_disabled'
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('Failed to log inactive user login attempt', ['error' => $e->getMessage()]);
+            }
+            
+            return redirect()->back()
+                ->withErrors(['email' => 'Votre compte a été désactivé. Contactez l\'administrateur.'])
+                ->withInput();
+        }
+
+        // Attempt authentication with active user check
         if (Auth::attempt(['email' => $credentials['email'], 'password' => $credentials['password'], 'is_active' => true], $remember)) {
             $request->session()->regenerate();
             
@@ -65,11 +95,15 @@ class AuthController extends Controller
             ]);
             
             // Log successful login
-            ActivityLog::logAuth('login', $user, [
-                'ip' => $request->ip(), 
-                'user_agent' => $request->userAgent(),
-                'remember' => $remember,
-            ]);
+            try {
+                ActivityLog::logAuth('login', $user, [
+                    'ip' => $request->ip(), 
+                    'user_agent' => $request->userAgent(),
+                    'remember' => $remember,
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('Failed to log successful login', ['error' => $e->getMessage()]);
+            }
 
             // Redirect based on user role
             if ($user->isAdmin()) {
@@ -78,28 +112,16 @@ class AuthController extends Controller
                 return redirect()->intended(route('pharmacist.dashboard'));
             }
         } else {
-            // Vérifier si l'utilisateur existe mais est désactivé
-            $user = User::where('email', $request->email)->first();
-            
-            if ($user && !$user->is_active) {
-                // Log failed login for inactive user
-                ActivityLog::logAuth('failed_login_inactive', $user, [
-                    'ip' => $request->ip(),
-                    'user_agent' => $request->userAgent(),
-                    'reason' => 'account_disabled'
-                ]);
-                
-                return redirect()->back()
-                    ->withErrors(['email' => 'Votre compte a été désactivé. Contactez l\'administrateur.'])
-                    ->withInput();
-            }
-            
-            // Log normal failed login
-            if ($user) {
-                ActivityLog::logAuth('failed_login', $user, [
-                    'ip' => $request->ip(),
-                    'user_agent' => $request->userAgent()
-                ]);
+            // Log failed login
+            try {
+                if ($user) {
+                    ActivityLog::logAuth('failed_login', $user, [
+                        'ip' => $request->ip(),
+                        'user_agent' => $request->userAgent()
+                    ]);
+                }
+            } catch (\Exception $e) {
+                Log::warning('Failed to log failed login attempt', ['error' => $e->getMessage()]);
             }
         }
 
@@ -107,6 +129,7 @@ class AuthController extends Controller
             ->withErrors(['email' => 'Ces identifiants ne correspondent pas à nos enregistrements.'])
             ->withInput();
     }
+
     /**
      * Show forgot password form
      */
@@ -154,13 +177,17 @@ class AuthController extends Controller
         ]);
 
         // Log reset request activity
-        ActivityLog::logActivity(
-            'reset',
-            "Demande de réinitialisation de mot de passe pour: {$user->name}",
-            $user,
-            null,
-            ['ip' => $request->ip(), 'email' => $email]
-        );
+        try {
+            ActivityLog::logActivity(
+                'reset',
+                "Demande de réinitialisation de mot de passe pour: {$user->name}",
+                $user,
+                null,
+                ['ip' => $request->ip(), 'email' => $email]
+            );
+        } catch (\Exception $e) {
+            Log::warning('Failed to log password reset request', ['error' => $e->getMessage()]);
+        }
 
         try {
             // Generate code
@@ -285,13 +312,17 @@ class AuthController extends Controller
         ]);
 
         // Log successful password reset
-        ActivityLog::logActivity(
-            'reset',
-            "Mot de passe réinitialisé avec succès pour: {$user->name}",
-            $user,
-            null,
-            ['ip' => $request->ip(), 'reset_time' => now()->toDateTimeString()]
-        );
+        try {
+            ActivityLog::logActivity(
+                'reset',
+                "Mot de passe réinitialisé avec succès pour: {$user->name}",
+                $user,
+                null,
+                ['ip' => $request->ip(), 'reset_time' => now()->toDateTimeString()]
+            );
+        } catch (\Exception $e) {
+            Log::warning('Failed to log password reset success', ['error' => $e->getMessage()]);
+        }
 
         Log::info('Password reset successful', [
             'user_id' => $user->id,
@@ -307,7 +338,7 @@ class AuthController extends Controller
     }
 
     /**
-     * Log the user out
+     * Log the user out - FIXED VERSION
      */
     public function logout(Request $request)
     {
@@ -321,13 +352,17 @@ class AuthController extends Controller
                 $sessionDuration = $user->last_login_at->diffInMinutes(now()) . ' minutes';
             }
             
-            ActivityLog::logAuth('logout', $user, [
-                'ip' => $request->ip(), 
-                'user_agent' => $request->userAgent(),
-                'logout_time' => now()->toDateTimeString(),
-                'session_duration' => $sessionDuration,
-                'session_id' => session()->getId()
-            ]);
+            try {
+                ActivityLog::logAuth('logout', $user, [
+                    'ip' => $request->ip(), 
+                    'user_agent' => $request->userAgent(),
+                    'logout_time' => now()->toDateTimeString(),
+                    'session_duration' => $sessionDuration,
+                    'session_id' => session()->getId()
+                ]);
+            } catch (\Exception $e) {
+                Log::warning('Failed to log logout activity', ['error' => $e->getMessage()]);
+            }
             
             Log::info('User logged out', [
                 'user_id' => $user->id,
@@ -337,11 +372,17 @@ class AuthController extends Controller
             ]);
         }
         
+        // Clear authentication
         Auth::logout();
         
+        // Invalidate session and regenerate token
         $request->session()->invalidate();
         $request->session()->regenerateToken();
         
+        // Clear any remaining session data
+        $request->session()->flush();
+        
+        // Redirect to login with success message
         return redirect()->route('login')->with('success', 'Vous avez été déconnecté avec succès.');
     }
 }

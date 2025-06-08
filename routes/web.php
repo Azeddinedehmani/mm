@@ -20,7 +20,7 @@ use App\Http\Controllers\UserController;
 |--------------------------------------------------------------------------
 */
 
-// ROUTE RACINE
+// ROUTE RACINE - FIXED
 Route::get('/', function () {
     if (auth()->check()) {
         $user = auth()->user();
@@ -31,38 +31,20 @@ Route::get('/', function () {
         }
     }
     return redirect()->route('login');
-});
-Route::middleware(['auth'])->group(function () {
-    // Notification routes
-    Route::prefix('notifications')->name('notifications.')->group(function () {
-        Route::get('/', [NotificationController::class, 'index'])->name('index');
-        Route::post('/{notification}/mark-read', [NotificationController::class, 'markAsRead'])->name('mark-read');
-        Route::post('/mark-all-read', [NotificationController::class, 'markAllAsRead'])->name('mark-all-read');
-        Route::delete('/{notification}', [NotificationController::class, 'destroy'])->name('destroy');
-        Route::delete('/read/delete', [NotificationController::class, 'deleteAllRead'])->name('delete-read');
-        Route::get('/recent', [NotificationController::class, 'getRecent'])->name('recent');
-        Route::get('/count', [NotificationController::class, 'getUnreadCount'])->name('count');
-        Route::get('/settings', [NotificationController::class, 'settings'])->name('settings');
-        Route::post('/settings', [NotificationController::class, 'updateSettings'])->name('settings.update');
-        
-        // Test route (only in local environment)
-        if (app()->environment('local')) {
-            Route::post('/test', [NotificationController::class, 'createTest'])->name('test');
-        }
-    });
-});
-// Authentication routes (sans middleware log.activity)
-Route::get('/login', [AuthController::class, 'showLoginForm'])->name('login');
-Route::post('/login', [AuthController::class, 'login']);
-Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+})->name('home');
 
-// Password reset routes
+// Authentication routes - NO MIDDLEWARE TO AVOID CONFLICTS
+Route::get('/login', [AuthController::class, 'showLoginForm'])->name('login');
+Route::post('/login', [AuthController::class, 'login'])->name('login.post');
+Route::post('/logout', [AuthController::class, 'logout'])->name('logout')->middleware('auth');
+
+// Password reset routes - NO MIDDLEWARE
 Route::get('/forgot-password', [AuthController::class, 'showForgotPasswordForm'])->name('password.forgot');
 Route::post('/forgot-password', [AuthController::class, 'sendResetCode'])->name('password.send.code');
 Route::get('/reset-password', [AuthController::class, 'showResetForm'])->name('password.reset.form');
 Route::post('/reset-password', [AuthController::class, 'resetPassword'])->name('password.reset');
 
-// Protected routes - SANS log.activity pour l'instant
+// Protected routes
 Route::middleware('auth')->group(function () {
     
     // Dashboard routes
@@ -91,10 +73,14 @@ Route::middleware('auth')->group(function () {
         
         Route::post('/{id}/mark-read', [NotificationController::class, 'markAsRead'])->name('mark-read');
         Route::post('/mark-all-read', [NotificationController::class, 'markAllAsRead'])->name('mark-all-read');
-        Route::post('/test', [NotificationController::class, 'createTest'])->name('test');
         
         Route::delete('/{id}', [NotificationController::class, 'destroy'])->name('destroy');
         Route::delete('/read/all', [NotificationController::class, 'deleteAllRead'])->name('delete-read');
+        
+        // Test route (only in local environment)
+        if (app()->environment('local')) {
+            Route::post('/test', [NotificationController::class, 'createTest'])->name('test');
+        }
     });
     
     // Inventory management routes
@@ -110,6 +96,11 @@ Route::middleware('auth')->group(function () {
     
     // Client management routes
     Route::resource('clients', ClientController::class);
+    Route::post('clients/{id}/deactivate', [ClientController::class, 'deactivate'])->name('clients.deactivate');
+    Route::post('clients/{id}/reactivate', [ClientController::class, 'reactivate'])->name('clients.reactivate');
+    Route::get('clients/{id}/dependencies', [ClientController::class, 'checkDependencies'])->name('clients.dependencies');
+    Route::get('clients/export', [ClientController::class, 'export'])->name('clients.export');
+    Route::get('clients/orphaned-sales', [ClientController::class, 'orphanedSales'])->name('clients.orphaned-sales');
     
     // Sales management routes
     Route::resource('sales', SaleController::class);
@@ -145,7 +136,6 @@ Route::middleware('auth')->group(function () {
             'update' => 'purchases.update',
             'destroy' => 'purchases.destroy'
         ]);
-        Route::delete('/purchases/{purchase}', [PurchaseController::class, 'destroy'])->name('purchases.destroy');
         
         Route::get('purchases/{id}/print', [PurchaseController::class, 'print'])->name('purchases.print');
         Route::get('purchases/{id}/receive', [PurchaseController::class, 'receive'])->name('purchases.receive');
@@ -155,10 +145,17 @@ Route::middleware('auth')->group(function () {
     
     // Admin panel routes
     Route::prefix('admin')->name('admin.')->middleware('admin')->group(function () {
-        Route::get('/dashboard', [AdminController::class, 'index'])->name('dashboard');
         Route::get('/administration', [AdminController::class, 'administration'])->name('administration');
         Route::get('/settings', [AdminController::class, 'settings'])->name('settings');
         Route::post('/settings', [AdminController::class, 'updateSettings'])->name('settings.update');
+        
+        // System management routes
+        Route::get('/system-status', [AdminController::class, 'systemStatus'])->name('system-status');
+        Route::get('/performance-metrics', [AdminController::class, 'performanceMetrics'])->name('performance-metrics');
+        Route::post('/toggle-maintenance', [AdminController::class, 'toggleMaintenance'])->name('toggle-maintenance');
+        Route::post('/clear-cache', [AdminController::class, 'clearCache'])->name('clear-cache');
+        Route::post('/optimize-database', [AdminController::class, 'optimizeDatabase'])->name('optimize-database');
+        Route::get('/health-check', [AdminController::class, 'healthCheck'])->name('health-check');
         
         // User management
         Route::resource('users', UserController::class)->names([
@@ -181,4 +178,17 @@ Route::middleware('auth')->group(function () {
         Route::get('/activity-logs/export', [AdminController::class, 'exportActivityLogs'])->name('export-activity-logs');
         Route::post('/clear-old-logs', [AdminController::class, 'clearOldLogs'])->name('clear-old-logs');
     });
+});
+
+// Fallback route for undefined routes
+Route::fallback(function () {
+    if (auth()->check()) {
+        $user = auth()->user();
+        if ($user->isAdmin()) {
+            return redirect()->route('admin.dashboard');
+        } else {
+            return redirect()->route('pharmacist.dashboard');
+        }
+    }
+    return redirect()->route('login');
 });

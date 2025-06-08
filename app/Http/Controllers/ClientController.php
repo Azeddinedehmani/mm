@@ -27,9 +27,9 @@ class ClientController extends Controller
     {
         $query = Client::query();
 
-        // Search functionality - Fixed with filled() instead of has()
-        if ($request->filled('search')) {
-            $search = trim($request->search);
+        // Search functionality
+        if ($request->has('search') && !empty($request->search)) {
+            $search = $request->search;
             $query->where(function($q) use ($search) {
                 $q->where('first_name', 'like', "%{$search}%")
                   ->orWhere('last_name', 'like', "%{$search}%")
@@ -39,8 +39,8 @@ class ClientController extends Controller
             });
         }
 
-        // Filter by status - Fixed with filled() instead of has()
-        if ($request->filled('status')) {
+        // Filter by status
+        if ($request->has('status') && $request->status !== '') {
             $query->where('active', $request->status === 'active');
         }
 
@@ -209,8 +209,7 @@ class ClientController extends Controller
     }
 
     /**
-     * Remove the specified client from storage (PRESERVE SALES).
-     * Les ventes sont conservées avec client_id = NULL pour l'historique.
+     * Remove the specified client from storage (SUPPRESSION EN CASCADE).
      */
     public function destroy($id)
     {
@@ -237,36 +236,61 @@ class ClientController extends Controller
                     ->withErrors(['error' => 'Seuls les administrateurs peuvent supprimer des clients.']);
             }
 
-            // SUPPRESSION AVEC PRÉSERVATION DES VENTES
+            // SUPPRESSION EN CASCADE AVEC TRANSACTION
             DB::beginTransaction();
             
             try {
                 $deletionSummary = [
                     'client_name' => $clientName,
                     'client_data' => $clientData,
-                    'sales_preserved' => 0,
+                    'sales_deleted' => 0,
+                    'sale_items_deleted' => 0,
                     'prescriptions_deleted' => 0,
                     'prescription_items_deleted' => 0,
+                    'stock_restored' => [],
                     'deleted_by' => auth()->user()->name,
                     'deletion_date' => now()->toDateTimeString()
                 ];
 
-                // 1. DÉTACHER LES VENTES (ne pas les supprimer)
+                // 1. SUPPRIMER LES VENTES ET LEURS ITEMS (avec restauration du stock)
                 if ($salesCount > 0) {
-                    // Mettre client_id à NULL pour préserver les ventes dans l'historique
-                    Sale::where('client_id', $id)->update([
-                        'client_id' => null,
-                        'client_name_at_deletion' => $clientName, // Optionnel : garder le nom pour référence
-                        'deleted_client_data' => json_encode([
-                            'id' => $client->id,
-                            'name' => $clientName,
-                            'email' => $client->email,
-                            'phone' => $client->phone,
-                            'deleted_at' => now()
-                        ])
-                    ]);
+                    $sales = $client->sales()->with(['saleItems.product'])->get();
                     
-                    $deletionSummary['sales_preserved'] = $salesCount;
+                    foreach ($sales as $sale) {
+                        // Restaurer le stock pour chaque item de vente
+                        foreach ($sale->saleItems as $saleItem) {
+                            if ($saleItem->product) {
+                                $oldStock = $saleItem->product->stock_quantity;
+                                $saleItem->product->increment('stock_quantity', $saleItem->quantity);
+                                $newStock = $saleItem->product->fresh()->stock_quantity;
+                                
+                                $deletionSummary['stock_restored'][] = [
+                                    'product_name' => $saleItem->product->name,
+                                    'quantity_restored' => $saleItem->quantity,
+                                    'old_stock' => $oldStock,
+                                    'new_stock' => $newStock
+                                ];
+                                
+                                // Log stock restoration
+                                ActivityLog::logStockChange(
+                                    $saleItem->product,
+                                    $oldStock,
+                                    $newStock,
+                                    "Suppression client #{$client->id} - Vente #{$sale->sale_number}"
+                                );
+                            }
+                        }
+                        
+                        // Compter les items supprimés
+                        $deletionSummary['sale_items_deleted'] += $sale->saleItems()->count();
+                        
+                        // Supprimer les items de vente
+                        $sale->saleItems()->delete();
+                    }
+                    
+                    // Supprimer les ventes
+                    $deletionSummary['sales_deleted'] = $client->sales()->count();
+                    $client->sales()->delete();
                 }
 
                 // 2. SUPPRIMER LES ORDONNANCES ET LEURS ITEMS
@@ -289,10 +313,10 @@ class ClientController extends Controller
                 // 3. SUPPRIMER LE CLIENT
                 $client->delete();
 
-                // Log de la suppression
+                // Log de la suppression complète
                 ActivityLog::logActivity(
                     'delete',
-                    "Client supprimé: {$clientName} | Ventes préservées: {$deletionSummary['sales_preserved']} | Ordonnances supprimées: {$deletionSummary['prescriptions_deleted']} | Items ordonnance supprimés: {$deletionSummary['prescription_items_deleted']}",
+                    "SUPPRESSION EN CASCADE - Client: {$clientName} | Ventes: {$deletionSummary['sales_deleted']} | Items vente: {$deletionSummary['sale_items_deleted']} | Ordonnances: {$deletionSummary['prescriptions_deleted']} | Items ordonnance: {$deletionSummary['prescription_items_deleted']}",
                     null,
                     $clientData,
                     $deletionSummary
@@ -302,11 +326,14 @@ class ClientController extends Controller
                 
                 // Message de succès détaillé
                 $message = "Client supprimé avec succès!";
-                if ($deletionSummary['sales_preserved'] > 0) {
-                    $message .= " {$deletionSummary['sales_preserved']} vente(s) préservée(s) dans l'historique.";
+                if ($deletionSummary['sales_deleted'] > 0) {
+                    $message .= " {$deletionSummary['sales_deleted']} vente(s) et {$deletionSummary['sale_items_deleted']} article(s) supprimés.";
                 }
                 if ($deletionSummary['prescriptions_deleted'] > 0) {
                     $message .= " {$deletionSummary['prescriptions_deleted']} ordonnance(s) supprimée(s).";
+                }
+                if (count($deletionSummary['stock_restored']) > 0) {
+                    $message .= " Stock restauré pour " . count($deletionSummary['stock_restored']) . " produit(s).";
                 }
                 
                 return redirect()->route('clients.index')
@@ -320,7 +347,7 @@ class ClientController extends Controller
         } catch (\Exception $e) {
             ActivityLog::logActivity(
                 'error',
-                "Erreur lors de la suppression du client: " . $e->getMessage(),
+                "Erreur lors de la suppression en cascade du client: " . $e->getMessage(),
                 isset($client) ? $client : null,
                 null,
                 [
@@ -332,7 +359,7 @@ class ClientController extends Controller
             );
             
             return redirect()->route('clients.index')
-                ->withErrors(['error' => 'Erreur lors de la suppression du client.']);
+                ->withErrors(['error' => 'Erreur lors de la suppression du client et de ses données associées.']);
         }
     }
 
@@ -431,34 +458,52 @@ class ClientController extends Controller
             $dependencies = [
                 'sales' => $client->sales()->count(),
                 'prescriptions' => Prescription::where('client_id', $id)->count(),
-                'will_be_preserved' => [],
                 'will_be_deleted' => [],
+                'stock_changes' => [],
                 'warnings' => []
             ];
             
-            // Ce qui sera préservé
+            // Calculer ce qui sera supprimé
             if ($dependencies['sales'] > 0) {
-                $dependencies['will_be_preserved'][] = "{$dependencies['sales']} vente(s) (préservées dans l'historique)";
+                $sales = $client->sales()->with(['saleItems.product'])->get();
+                $totalItems = 0;
+                $affectedProducts = [];
+                
+                foreach ($sales as $sale) {
+                    foreach ($sale->saleItems as $item) {
+                        $totalItems++;
+                        if ($item->product) {
+                            $productName = $item->product->name;
+                            if (!isset($affectedProducts[$productName])) {
+                                $affectedProducts[$productName] = [
+                                    'name' => $productName,
+                                    'current_stock' => $item->product->stock_quantity,
+                                    'quantity_to_restore' => 0
+                                ];
+                            }
+                            $affectedProducts[$productName]['quantity_to_restore'] += $item->quantity;
+                        }
+                    }
+                }
+                
+                $dependencies['will_be_deleted'][] = "{$dependencies['sales']} vente(s) avec {$totalItems} article(s)";
+                $dependencies['stock_changes'] = array_values($affectedProducts);
             }
             
-            // Ce qui sera supprimé
             if ($dependencies['prescriptions'] > 0) {
                 $dependencies['will_be_deleted'][] = "{$dependencies['prescriptions']} ordonnance(s)";
             }
             
             // Avertissements
             if ($dependencies['sales'] > 0) {
-                $dependencies['warnings'][] = "ℹ️ INFO: Les ventes seront préservées dans l'historique comptable";
+                $dependencies['warnings'][] = "⚠️ ATTENTION: Le stock sera restauré automatiquement";
             }
             if ($dependencies['prescriptions'] > 0) {
                 $dependencies['warnings'][] = "⚠️ ATTENTION: Les ordonnances seront définitivement supprimées";
             }
             
-            $dependencies['can_delete'] = true;
-            $dependencies['action_type'] = 'preserve_sales';
-            $dependencies['recommendation'] = $dependencies['sales'] > 0 ? 
-                "Recommandation: Considérez plutôt désactiver le client pour préserver toutes les données." : 
-                "Aucune vente associée, suppression sûre.";
+            $dependencies['can_delete'] = true; // Toujours possible maintenant
+            $dependencies['action_type'] = 'cascade_delete';
             
             return response()->json($dependencies);
             
@@ -471,7 +516,7 @@ class ClientController extends Controller
     }
 
     /**
-     * Export clients avec statut des ventes.
+     * Export clients avec statut de suppression sécurisée.
      */
     public function export(Request $request)
     {
@@ -480,7 +525,7 @@ class ClientController extends Controller
         }]);
 
         // Apply filters
-        if ($request->filled('status')) {
+        if ($request->has('status') && $request->status !== '') {
             $query->where('active', $request->status === 'active');
         }
 
@@ -518,16 +563,13 @@ class ClientController extends Controller
                 'Statut',
                 'Nb Ventes',
                 'Nb Ordonnances',
-                'Action recommandée',
+                'Peut être supprimé',
                 'Date création',
                 'Dernière modification'
             ], ';');
 
             foreach ($clients as $client) {
-                $action = 'Suppression directe';
-                if ($client->sales_count > 0) {
-                    $action = 'Désactivation recommandée';
-                }
+                $canDelete = ($client->sales_count == 0 && $client->prescriptions_count == 0) ? 'Oui' : 'Non';
                 
                 fputcsv($file, [
                     $client->id,
@@ -538,7 +580,7 @@ class ClientController extends Controller
                     $client->active ? 'Actif' : 'Inactif',
                     $client->sales_count,
                     $client->prescriptions_count ?? 0,
-                    $action,
+                    $canDelete,
                     $client->created_at->format('d/m/Y H:i'),
                     $client->updated_at->format('d/m/Y H:i')
                 ], ';');
@@ -548,18 +590,5 @@ class ClientController extends Controller
         };
 
         return response()->stream($callback, 200, $headers);
-    }
-
-    /**
-     * Voir les ventes orphelines (sans client).
-     */
-    public function orphanedSales()
-    {
-        $orphanedSales = Sale::whereNull('client_id')
-                           ->with(['saleItems.product', 'user'])
-                           ->latest()
-                           ->paginate(15);
-                           
-        return view('clients.orphaned-sales', compact('orphanedSales'));
     }
 }

@@ -22,6 +22,14 @@ class RedirectIfAuthenticated
         foreach ($guards as $guard) {
             if (Auth::guard($guard)->check()) {
                 $user = Auth::guard($guard)->user();
+                
+                // Make sure user is active before redirecting
+                if (!$user->is_active) {
+                    Auth::logout();
+                    return redirect()->route('login')->withErrors(['email' => 'Votre compte a été désactivé.']);
+                }
+                
+                // Redirect based on role
                 if ($user->isAdmin()) {
                     return redirect()->route('admin.dashboard');
                 } else {
