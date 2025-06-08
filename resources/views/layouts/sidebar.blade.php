@@ -1,3 +1,6 @@
+<?php
+// resources/views/layouts/sidebar.blade.php - Updated version with pharmacist restrictions
+?>
 <div class="sidebar p-3" style="background: linear-gradient(180deg, #336699 0%, #4a90e2 100%); box-shadow: 4px 0 20px rgba(0, 0, 0, 0.1);">
     <!-- Logo and Brand Section -->
     <div class="text-center mb-4 pb-3 border-bottom border-light border-opacity-25">
@@ -110,7 +113,8 @@
                 </a>
             </li>
             
-            <!-- Suppliers -->
+            <!-- Suppliers - ADMIN ONLY -->
+            @if(Auth::user()->isAdmin())
             <li class="nav-item mb-1">
                 <a class="nav-link {{ request()->is('suppliers*') ? 'active' : '' }}" 
                    href="{{ route('suppliers.index') }}"
@@ -132,8 +136,7 @@
                 </a>
             </li>
             
-            @if(Auth::user()->isAdmin())
-            <!-- Purchases (Admin only) -->
+            <!-- Purchases - ADMIN ONLY -->
             <li class="nav-item mb-1">
                 <a class="nav-link {{ request()->is('purchases*') ? 'active' : '' }}" 
                    href="{{ route('purchases.index') }}"
@@ -158,7 +161,8 @@
             </li>
             @endif
             
-            <!-- Reports -->
+            <!-- Reports - ADMIN ONLY -->
+            @if(Auth::user()->isAdmin())
             <li class="nav-item mb-1">
                 <a class="nav-link {{ request()->is('rapports*') ? 'active' : '' }}" 
                    href="{{ route('reports.index') }}"
@@ -171,6 +175,7 @@
                     <span style="font-weight: 500;">Rapports</span>
                 </a>
             </li>
+            @endif
             
             @if(Auth::user()->isAdmin())
             <!-- Administration Section -->
@@ -233,8 +238,9 @@
                     <span style="font-weight: 500;">Administration système</span>
                 </a>
             </li>
+            @endif
             
-            <!-- Notifications -->
+            <!-- Notifications - FOR BOTH ROLES -->
             <li class="nav-item mb-1">
                 <a class="nav-link {{ request()->is('notifications*') ? 'active' : '' }}" 
                    href="{{ route('notifications.index') }}"
@@ -256,7 +262,8 @@
                 </a>
             </li>
             
-            <!-- System Settings -->
+            <!-- System Settings - ADMIN ONLY -->
+            @if(Auth::user()->isAdmin())
             <li class="nav-item mb-1">
                 <a class="nav-link {{ request()->is('admin/settings*') ? 'active' : '' }}" 
                    href="{{ route('admin.settings') }}"
@@ -273,7 +280,7 @@
         </ul>
     </nav>
     
-    <!-- Logout Button -->
+      <!-- Logout Button -->
     <div class="mt-auto pt-4">
         <form method="POST" action="{{ route('logout') }}">
             @csrf

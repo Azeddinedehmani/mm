@@ -1,4 +1,5 @@
 <?php
+// routes/web.php - Updated with pharmacist restrictions
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\AuthController;
@@ -16,7 +17,7 @@ use App\Http\Controllers\UserController;
 
 /*
 |--------------------------------------------------------------------------
-| Web Routes
+| Web Routes - Updated with Role-based Access Control
 |--------------------------------------------------------------------------
 */
 
@@ -51,19 +52,19 @@ Route::middleware('auth')->group(function () {
     Route::get('/admin/dashboard', [AdminController::class, 'index'])->name('admin.dashboard')->middleware('admin');
     Route::get('/pharmacist/dashboard', [PharmacistController::class, 'index'])->name('pharmacist.dashboard')->middleware('pharmacist');
     
-    // Routes des rapports
-    Route::prefix('rapports')->name('reports.')->group(function () {
+    // Routes des rapports - ADMIN ONLY
+    Route::prefix('rapports')->name('reports.')->middleware('admin')->group(function () {
         Route::get('/', [ReportController::class, 'index'])->name('index');
         Route::get('/ventes', [ReportController::class, 'sales'])->name('sales');
         Route::get('/inventaire', [ReportController::class, 'inventory'])->name('inventory');
         Route::get('/clients', [ReportController::class, 'clients'])->name('clients');
         Route::get('/ordonnances', [ReportController::class, 'prescriptions'])->name('prescriptions');
         Route::get('/financier', [ReportController::class, 'financial'])->name('financial');
-        Route::get('/utilisateurs', [ReportController::class, 'users'])->name('users')->middleware('admin');
-        Route::get('/fournisseurs', [ReportController::class, 'suppliers'])->name('suppliers')->middleware('admin');
+        Route::get('/utilisateurs', [ReportController::class, 'users'])->name('users');
+        Route::get('/fournisseurs', [ReportController::class, 'suppliers'])->name('suppliers');
     });
 
-    // Notification routes
+    // Notification routes - AVAILABLE TO BOTH ROLES
     Route::prefix('notifications')->name('notifications.')->group(function () {
         Route::get('/', [NotificationController::class, 'index'])->name('index');
         Route::get('/recent', [NotificationController::class, 'getRecent'])->name('recent');
@@ -83,7 +84,7 @@ Route::middleware('auth')->group(function () {
         }
     });
     
-    // Inventory management routes
+    // Inventory management routes - AVAILABLE TO BOTH ROLES
     Route::resource('inventory', ProductController::class)->names([
         'index' => 'inventory.index',
         'create' => 'inventory.create',
@@ -94,7 +95,7 @@ Route::middleware('auth')->group(function () {
         'destroy' => 'inventory.destroy'
     ]);
     
-    // Client management routes
+    // Client management routes - AVAILABLE TO BOTH ROLES
     Route::resource('clients', ClientController::class);
     Route::post('clients/{id}/deactivate', [ClientController::class, 'deactivate'])->name('clients.deactivate');
     Route::post('clients/{id}/reactivate', [ClientController::class, 'reactivate'])->name('clients.reactivate');
@@ -102,20 +103,20 @@ Route::middleware('auth')->group(function () {
     Route::get('clients/export', [ClientController::class, 'export'])->name('clients.export');
     Route::get('clients/orphaned-sales', [ClientController::class, 'orphanedSales'])->name('clients.orphaned-sales');
     
-    // Sales management routes
+    // Sales management routes - AVAILABLE TO BOTH ROLES
     Route::resource('sales', SaleController::class);
     Route::get('sales/{id}/print', [SaleController::class, 'print'])->name('sales.print');
     Route::get('sales/product/{id}', [SaleController::class, 'getProduct'])->name('sales.get-product');
     
-    // Prescription management routes
+    // Prescription management routes - AVAILABLE TO BOTH ROLES
     Route::resource('prescriptions', PrescriptionController::class);
     Route::get('prescriptions/{id}/deliver', [PrescriptionController::class, 'deliver'])->name('prescriptions.deliver');
     Route::post('prescriptions/{id}/deliver', [PrescriptionController::class, 'processDelivery'])->name('prescriptions.process-delivery');
     Route::get('prescriptions/{id}/print', [PrescriptionController::class, 'print'])->name('prescriptions.print');
     
-    // Admin-only routes
+    // Admin-only routes - SUPPLIERS & PURCHASES
     Route::middleware('admin')->group(function () {
-        // Supplier management routes
+        // Supplier management routes - ADMIN ONLY
         Route::resource('suppliers', SupplierController::class)->names([
             'index' => 'suppliers.index',
             'create' => 'suppliers.create',
@@ -126,7 +127,7 @@ Route::middleware('auth')->group(function () {
             'destroy' => 'suppliers.destroy'
         ]);
         
-        // Purchase management routes
+        // Purchase management routes - ADMIN ONLY
         Route::resource('purchases', PurchaseController::class)->names([
             'index' => 'purchases.index',
             'create' => 'purchases.create',
@@ -143,7 +144,7 @@ Route::middleware('auth')->group(function () {
         Route::patch('purchases/{id}/cancel', [PurchaseController::class, 'cancel'])->name('purchases.cancel');
     });
     
-    // Admin panel routes
+    // Admin panel routes - ADMIN ONLY
     Route::prefix('admin')->name('admin.')->middleware('admin')->group(function () {
         Route::get('/administration', [AdminController::class, 'administration'])->name('administration');
         Route::get('/settings', [AdminController::class, 'settings'])->name('settings');
@@ -178,6 +179,29 @@ Route::middleware('auth')->group(function () {
         Route::get('/activity-logs/export', [AdminController::class, 'exportActivityLogs'])->name('export-activity-logs');
         Route::post('/clear-old-logs', [AdminController::class, 'clearOldLogs'])->name('clear-old-logs');
     });
+});
+
+// Block access to report routes for pharmacists
+Route::middleware(['auth', 'pharmacist'])->group(function () {
+    // Redirect pharmacists trying to access reports to their dashboard
+    Route::get('/rapports{any?}', function () {
+        return redirect()->route('pharmacist.dashboard')->with('error', 'Accès non autorisé. Les rapports sont réservés aux administrateurs.');
+    })->where('any', '.*');
+    
+    // Block access to supplier routes for pharmacists
+    Route::get('/suppliers{any?}', function () {
+        return redirect()->route('pharmacist.dashboard')->with('error', 'Accès non autorisé. La gestion des fournisseurs est réservée aux administrateurs.');
+    })->where('any', '.*');
+    
+    // Block access to purchase routes for pharmacists
+    Route::get('/purchases{any?}', function () {
+        return redirect()->route('pharmacist.dashboard')->with('error', 'Accès non autorisé. La gestion des achats est réservée aux administrateurs.');
+    })->where('any', '.*');
+    
+    // Block access to admin routes for pharmacists
+    Route::get('/admin{any?}', function () {
+        return redirect()->route('pharmacist.dashboard')->with('error', 'Accès non autorisé. Les fonctions d\'administration sont réservées aux responsables.');
+    })->where('any', '.*');
 });
 
 // Fallback route for undefined routes

@@ -22,13 +22,18 @@ class ProductController extends Controller
     }
 
     /**
-     * Display a listing of the products.
+     * Display a listing of the products - Updated filtering
      */
     public function index(Request $request)
     {
-        $query = Product::with(['category', 'supplier']);
+        $query = Product::with(['category']);
+        
+        // Only load supplier relationship for admins
+        if (auth()->user()->isAdmin()) {
+            $query->with('supplier');
+        }
 
-        // Recherche
+        // Search functionality
         if ($request->has('search') && !empty($request->search)) {
             $search = $request->search;
             $query->where(function($q) use ($search) {
@@ -38,17 +43,21 @@ class ProductController extends Controller
             });
         }
 
-        // Filtre par catégorie
+        // Filter by category
         if ($request->has('category') && $request->category != '') {
             $query->where('category_id', $request->category);
         }
 
-        // Filtre par fournisseur
-        if ($request->has('supplier') && $request->supplier != '') {
-            $query->where('supplier_id', $request->supplier);
+        // Filter by supplier (admin only)
+        if (auth()->user()->isAdmin() && $request->has('supplier') && $request->supplier != '') {
+            if ($request->supplier === 'none') {
+                $query->whereNull('supplier_id');
+            } else {
+                $query->where('supplier_id', $request->supplier);
+            }
         }
 
-        // Filtre par stock
+        // Filter by stock status
         if ($request->has('stock_status') && !empty($request->stock_status)) {
             if ($request->stock_status == 'low') {
                 $query->whereColumn('stock_quantity', '<=', 'stock_threshold');
@@ -59,29 +68,38 @@ class ProductController extends Controller
 
         $products = $query->paginate(10);
         $categories = Category::all();
-        $suppliers = Supplier::all();
+        
+        // Only load suppliers for admins
+        $suppliers = auth()->user()->isAdmin() ? Supplier::all() : collect();
         
         return view('inventory.index', compact('products', 'categories', 'suppliers'));
     }
 
     /**
-     * Show the form for creating a new product.
+     * Show the form for creating a new product - Updated for role-based fields
      */
     public function create(Request $request)
     {
         $categories = Category::all();
-        $suppliers = Supplier::where('active', true)->get();
         $selectedSupplierId = $request->get('supplier_id');
+        
+        // Only load suppliers for admins
+        if (auth()->user()->isAdmin()) {
+            $suppliers = Supplier::where('active', true)->get();
+        } else {
+            $suppliers = collect(); // Empty collection for pharmacists
+        }
         
         return view('inventory.create', compact('categories', 'suppliers', 'selectedSupplierId'));
     }
 
     /**
-     * Store a newly created product in storage.
+     * Store a newly created product in storage - Updated for pharmacists
      */
     public function store(Request $request)
     {
-        $validator = Validator::make($request->all(), [
+        // Different validation rules based on user role
+        $rules = [
             'name' => 'required|string|max:255',
             'category_id' => 'required|exists:categories,id',
             'purchase_price' => 'required|numeric|min:0',
@@ -90,10 +108,16 @@ class ProductController extends Controller
             'stock_threshold' => 'required|integer|min:0',
             'barcode' => 'nullable|string|unique:products',
             'description' => 'nullable|string',
-            'supplier_id' => 'nullable|exists:suppliers,id',
             'expiry_date' => 'nullable|date|after:today',
             'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048'
-        ]);
+        ];
+
+        // Only admins can specify suppliers
+        if (auth()->user()->isAdmin()) {
+            $rules['supplier_id'] = 'nullable|exists:suppliers,id';
+        }
+
+        $validator = Validator::make($request->all(), $rules);
 
         if ($validator->fails()) {
             return redirect()->back()
@@ -103,8 +127,16 @@ class ProductController extends Controller
 
         try {
             $product = new Product();
-            $product->fill($request->except('image', 'prescription_required'));
+            $product->fill($request->except('image', 'prescription_required', 'supplier_id'));
             $product->prescription_required = $request->has('prescription_required');
+            
+            // Handle supplier_id based on user role
+            if (auth()->user()->isAdmin()) {
+                $product->supplier_id = $request->supplier_id;
+            } else {
+                // For pharmacists, supplier_id will be null
+                $product->supplier_id = null;
+            }
 
             if ($request->hasFile('image')) {
                 $imagePath = $request->file('image')->store('products', 'public');
@@ -116,7 +148,7 @@ class ProductController extends Controller
             // Log product creation
             ActivityLog::logActivity(
                 'create',
-                "Produit ajouté à l'inventaire: {$product->name}",
+                "Produit ajouté à l'inventaire: {$product->name}" . (auth()->user()->isPharmacist() ? ' (par pharmacien)' : ''),
                 $product,
                 null,
                 $product->toArray()
@@ -125,7 +157,8 @@ class ProductController extends Controller
             Log::info('Product created successfully', [
                 'product_id' => $product->id,
                 'product_name' => $product->name,
-                'created_by' => auth()->id()
+                'created_by' => auth()->id(),
+                'user_role' => auth()->user()->role
             ]);
 
             return redirect()->route('inventory.index')
@@ -156,7 +189,14 @@ class ProductController extends Controller
      */
     public function show($id)
     {
-        $product = Product::with(['category', 'supplier'])->findOrFail($id);
+        $query = Product::with(['category']);
+        
+        // Only load supplier for admins
+        if (auth()->user()->isAdmin()) {
+            $query->with('supplier');
+        }
+        
+        $product = $query->findOrFail($id);
         return view('inventory.show', compact('product'));
     }
 
@@ -167,7 +207,14 @@ class ProductController extends Controller
     {
         $product = Product::findOrFail($id);
         $categories = Category::all();
-        $suppliers = Supplier::all();
+        
+        // Only load suppliers for admins
+        if (auth()->user()->isAdmin()) {
+            $suppliers = Supplier::all();
+        } else {
+            $suppliers = collect();
+        }
+        
         return view('inventory.edit', compact('product', 'categories', 'suppliers'));
     }
 
@@ -179,7 +226,8 @@ class ProductController extends Controller
         $product = Product::findOrFail($id);
         $oldValues = $product->toArray();
 
-        $validator = Validator::make($request->all(), [
+        // Different validation rules based on user role
+        $rules = [
             'name' => 'required|string|max:255',
             'category_id' => 'required|exists:categories,id',
             'purchase_price' => 'required|numeric|min:0',
@@ -188,10 +236,16 @@ class ProductController extends Controller
             'stock_threshold' => 'required|integer|min:0',
             'barcode' => 'nullable|string|unique:products,barcode,'.$id,
             'description' => 'nullable|string',
-            'supplier_id' => 'nullable|exists:suppliers,id',
             'expiry_date' => 'nullable|date',
             'image' => 'nullable|image|mimes:jpeg,png,jpg,gif|max:2048'
-        ]);
+        ];
+
+        // Only admins can modify suppliers
+        if (auth()->user()->isAdmin()) {
+            $rules['supplier_id'] = 'nullable|exists:suppliers,id';
+        }
+
+        $validator = Validator::make($request->all(), $rules);
 
         if ($validator->fails()) {
             return redirect()->back()
@@ -202,10 +256,15 @@ class ProductController extends Controller
         try {
             // Store old stock for logging
             $oldStock = $product->stock_quantity;
-            $oldThreshold = $product->stock_threshold;
             
-            $product->fill($request->except('image', 'prescription_required'));
+            $product->fill($request->except('image', 'prescription_required', 'supplier_id'));
             $product->prescription_required = $request->has('prescription_required');
+
+            // Handle supplier_id based on user role
+            if (auth()->user()->isAdmin()) {
+                $product->supplier_id = $request->supplier_id;
+            }
+            // For pharmacists, don't modify the supplier_id
 
             if ($request->hasFile('image')) {
                 // Supprimer l'ancienne image si elle existe
@@ -232,7 +291,7 @@ class ProductController extends Controller
             // Log product update
             ActivityLog::logActivity(
                 'update',
-                "Produit modifié: {$product->name}",
+                "Produit modifié: {$product->name}" . (auth()->user()->isPharmacist() ? ' (par pharmacien)' : ''),
                 $product,
                 $oldValues,
                 $product->toArray()
@@ -242,6 +301,7 @@ class ProductController extends Controller
                 'product_id' => $product->id,
                 'product_name' => $product->name,
                 'updated_by' => auth()->id(),
+                'user_role' => auth()->user()->role,
                 'stock_changed' => $oldStock != $product->stock_quantity
             ]);
 
@@ -276,6 +336,8 @@ class ProductController extends Controller
             $productData = $product->toArray();
             $productName = $product->name;
             
+            // Check if user has permission to delete (you can add additional checks here)
+            
             // Supprimer l'image si elle existe
             if ($product->image_path) {
                 Storage::disk('public')->delete($product->image_path);
@@ -284,7 +346,7 @@ class ProductController extends Controller
             // Log deletion before actually deleting
             ActivityLog::logActivity(
                 'delete',
-                "Produit supprimé de l'inventaire: {$productName}",
+                "Produit supprimé de l'inventaire: {$productName}" . (auth()->user()->isPharmacist() ? ' (par pharmacien)' : ''),
                 null,
                 $productData,
                 null
@@ -295,7 +357,8 @@ class ProductController extends Controller
             Log::info('Product deleted successfully', [
                 'product_id' => $id,
                 'product_name' => $productName,
-                'deleted_by' => auth()->id()
+                'deleted_by' => auth()->id(),
+                'user_role' => auth()->user()->role
             ]);
 
             return redirect()->route('inventory.index')
