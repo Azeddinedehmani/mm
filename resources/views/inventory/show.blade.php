@@ -9,9 +9,12 @@
         <a href="{{ route('inventory.index') }}" class="btn btn-secondary me-2">
             <i class="fas fa-arrow-left me-1"></i> Retour
         </a>
-        <a href="{{ route('inventory.edit', $product->id) }}" class="btn btn-primary">
-            <i class="fas fa-edit me-1"></i> Modifier
-        </a>
+        {{-- Only show edit button if user is not a pharmacist --}}
+        @can('edit-products')
+            <a href="{{ route('inventory.edit', $product->id) }}" class="btn btn-primary">
+                <i class="fas fa-edit me-1"></i> Modifier
+            </a>
+        @endcan
     </div>
 </div>
 
@@ -30,11 +33,14 @@
                     </div>
                 @endif
                 
-                <div class="d-grid gap-2">
-                    <button class="btn btn-warning" type="button">
-                        <i class="fas fa-exchange-alt me-1"></i> Ajuster le stock
-                    </button>
-                </div>
+                {{-- Only show stock adjustment button if user can manage stock --}}
+                @can('manage-stock')
+                    <div class="d-grid gap-2">
+                        <button class="btn btn-warning" type="button">
+                            <i class="fas fa-exchange-alt me-1"></i> Ajuster le stock
+                        </button>
+                    </div>
+                @endcan
             </div>
             
             <div class="col-md-8">
@@ -70,18 +76,26 @@
                     <div class="col-md-6">
                         <h6 class="text-muted mb-2">Prix et stock</h6>
                         <ul class="list-group mb-4">
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <strong>Prix d'achat</strong>
-                                <span>{{ number_format($product->purchase_price, 2) }} €</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <strong>Prix de vente</strong>
-                                <span>{{ number_format($product->selling_price, 2) }} €</span>
-                            </li>
-                            <li class="list-group-item d-flex justify-content-between align-items-center">
-                                <strong>Marge</strong>
-                                <span>{{ number_format($product->selling_price - $product->purchase_price, 2) }} € ({{ number_format((($product->selling_price - $product->purchase_price) / $product->purchase_price) * 100, 2) }}%)</span>
-                            </li>
+                            {{-- Only show pricing information if user can view prices --}}
+                            @can('view-prices')
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <strong>Prix d'achat</strong>
+                                    <span>{{ number_format($product->purchase_price, 2) }} €</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <strong>Prix de vente</strong>
+                                    <span>{{ number_format($product->selling_price, 2) }} €</span>
+                                </li>
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <strong>Marge</strong>
+                                    <span>{{ number_format($product->selling_price - $product->purchase_price, 2) }} € ({{ number_format((($product->selling_price - $product->purchase_price) / $product->purchase_price) * 100, 2) }}%)</span>
+                                </li>
+                            @else
+                                <li class="list-group-item d-flex justify-content-between align-items-center">
+                                    <strong>Prix de vente</strong>
+                                    <span>{{ number_format($product->selling_price, 2) }} €</span>
+                                </li>
+                            @endcan
                             <li class="list-group-item d-flex justify-content-between align-items-center">
                                 <strong>Stock actuel</strong>
                                 @if($product->isOutOfStock())
