@@ -36,7 +36,7 @@ class AuthController extends Controller
     /**
      * Handle login request
      */
-    public function login(Request $request)
+     public function login(Request $request)
     {
         $validator = Validator::make($request->all(), [
             'email' => 'required|email',
@@ -52,14 +52,8 @@ class AuthController extends Controller
         $credentials = $request->only('email', 'password');
         $remember = $request->has('remember');
 
-        // Log login attempt
-        Log::info('Login attempt', [
-            'email' => $request->email,
-            'ip' => $request->ip(),
-            'user_agent' => $request->userAgent()
-        ]);
-
-        if (Auth::attempt($credentials, $remember)) {
+        // NOUVELLE MÉTHODE: Inclure is_active dans les credentials
+        if (Auth::attempt(['email' => $credentials['email'], 'password' => $credentials['password'], 'is_active' => true], $remember)) {
             $request->session()->regenerate();
             
             $user = Auth::user();
@@ -70,20 +64,11 @@ class AuthController extends Controller
                 'last_login_ip' => $request->ip(),
             ]);
             
-            // Log successful login using ActivityLog
+            // Log successful login
             ActivityLog::logAuth('login', $user, [
                 'ip' => $request->ip(), 
                 'user_agent' => $request->userAgent(),
                 'remember' => $remember,
-                'login_time' => now()->toDateTimeString(),
-                'session_id' => session()->getId()
-            ]);
-            
-            Log::info('User logged in successfully', [
-                'user_id' => $user->id,
-                'email' => $user->email,
-                'role' => $user->role,
-                'ip' => $request->ip()
             ]);
 
             // Redirect based on user role
@@ -93,20 +78,27 @@ class AuthController extends Controller
                 return redirect()->intended(route('pharmacist.dashboard'));
             }
         } else {
-            // Log failed login attempt
-            Log::warning('Failed login attempt', [
-                'email' => $request->email,
-                'ip' => $request->ip(),
-                'user_agent' => $request->userAgent()
-            ]);
-
-            // Try to find user for failed login logging
+            // Vérifier si l'utilisateur existe mais est désactivé
             $user = User::where('email', $request->email)->first();
+            
+            if ($user && !$user->is_active) {
+                // Log failed login for inactive user
+                ActivityLog::logAuth('failed_login_inactive', $user, [
+                    'ip' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                    'reason' => 'account_disabled'
+                ]);
+                
+                return redirect()->back()
+                    ->withErrors(['email' => 'Votre compte a été désactivé. Contactez l\'administrateur.'])
+                    ->withInput();
+            }
+            
+            // Log normal failed login
             if ($user) {
                 ActivityLog::logAuth('failed_login', $user, [
                     'ip' => $request->ip(),
-                    'user_agent' => $request->userAgent(),
-                    'attempted_email' => $request->email
+                    'user_agent' => $request->userAgent()
                 ]);
             }
         }
@@ -115,7 +107,6 @@ class AuthController extends Controller
             ->withErrors(['email' => 'Ces identifiants ne correspondent pas à nos enregistrements.'])
             ->withInput();
     }
-
     /**
      * Show forgot password form
      */

@@ -91,160 +91,185 @@ class SaleController extends Controller
      */
     public function store(Request $request)
     {
-        Log::info('Sale creation attempt', [
-            'user_id' => auth()->id(),
-            'request_data' => $request->all()
-        ]);
-
-        $validator = Validator::make($request->all(), [
-            'client_id' => 'nullable|exists:clients,id',
-            'payment_method' => 'required|in:cash,card,insurance,other',
-            'has_prescription' => 'boolean',
-            'prescription_number' => 'nullable|string|max:255',
-            'discount_amount' => 'nullable|numeric|min:0',
-            'notes' => 'nullable|string',
-            'products' => 'required|array|min:1',
-            'products.*.id' => 'required|exists:products,id',
-            'products.*.quantity' => 'required|integer|min:1',
-        ], [
-            'products.required' => 'Veuillez ajouter au moins un produit à la vente.',
-            'products.*.id.required' => 'ID produit manquant.',
-            'products.*.id.exists' => 'Un des produits sélectionnés n\'existe pas.',
-            'products.*.quantity.required' => 'Quantité manquante pour un produit.',
-            'products.*.quantity.min' => 'La quantité doit être d\'au moins 1.',
-        ]);
-
-        if ($validator->fails()) {
-            Log::warning('Sale creation validation failed', [
-                'errors' => $validator->errors()->toArray(),
+        try {
+            Log::info('Sale creation attempt', [
+                'user_id' => auth()->id(),
                 'request_data' => $request->all()
             ]);
-            
-            return redirect()->back()
-                ->withErrors($validator)
-                ->withInput();
-        }
 
-        // Validate stock availability and prepare product data
-        $productData = [];
-        foreach ($request->products as $item) {
-            $product = Product::find($item['id']);
-            if (!$product) {
-                return redirect()->back()
-                    ->withErrors(['products' => "Produit avec l'ID {$item['id']} introuvable."])
-                    ->withInput();
-            }
-            
-            $quantity = (int) $item['quantity'];
-            if ($product->stock_quantity < $quantity) {
-                return redirect()->back()
-                    ->withErrors(['products' => "Stock insuffisant pour {$product->name}. Stock disponible: {$product->stock_quantity}, demandé: {$quantity}"])
-                    ->withInput();
-            }
-            
-            $productData[] = [
-                'product' => $product,
-                'quantity' => $quantity
-            ];
-        }
-
-        DB::beginTransaction();
-        
-        try {
-            // Create sale
-            $sale = new Sale();
-            $sale->client_id = $request->client_id;
-            $sale->user_id = auth()->id();
-            $sale->payment_method = $request->payment_method;
-            $sale->payment_status = 'paid';
-            $sale->has_prescription = $request->has('has_prescription');
-            $sale->prescription_number = $request->prescription_number;
-            $sale->discount_amount = $request->discount_amount ?? 0;
-            $sale->notes = $request->notes;
-            $sale->sale_date = now();
-            
-            // Calculate totals before saving
-            $subtotal = 0;
-            foreach ($productData as $item) {
-                $subtotal += $item['product']->selling_price * $item['quantity'];
-            }
-            
-            $sale->subtotal = $subtotal;
-            $sale->tax_amount = $subtotal * 0.20; // 20% tax
-            $sale->total_amount = $subtotal + $sale->tax_amount - $sale->discount_amount;
-            
-            $sale->save();
-
-            // Log sale creation
-            $clientName = $sale->client ? $sale->client->full_name : 'Client anonyme';
-            ActivityLog::logTransaction('sale', $sale, 'create', [
-                'client_name' => $clientName,
-                'total_amount' => $sale->total_amount,
-                'payment_method' => $sale->payment_method,
-                'products_count' => count($productData)
+            $validator = Validator::make($request->all(), [
+                'client_id' => 'nullable|exists:clients,id',
+                'payment_method' => 'required|in:cash,card,insurance,other',
+                'has_prescription' => 'boolean',
+                'prescription_number' => 'nullable|string|max:255',
+                'discount_amount' => 'nullable|numeric|min:0',
+                'notes' => 'nullable|string',
+                'products' => 'required|array|min:1',
+                'products.*.id' => 'required|exists:products,id',
+                'products.*.quantity' => 'required|integer|min:1',
+            ], [
+                'products.required' => 'Veuillez ajouter au moins un produit à la vente.',
+                'products.*.id.required' => 'ID produit manquant.',
+                'products.*.id.exists' => 'Un des produits sélectionnés n\'existe pas.',
+                'products.*.quantity.required' => 'Quantité manquante pour un produit.',
+                'products.*.quantity.min' => 'La quantité doit être d\'au moins 1.',
             ]);
 
-            Log::info('Sale created successfully', [
-                'sale_id' => $sale->id,
-                'sale_number' => $sale->sale_number,
-                'total_amount' => $sale->total_amount
-            ]);
-
-            // Create sale items and update stock
-            foreach ($productData as $item) {
-                $saleItem = new SaleItem();
-                $saleItem->sale_id = $sale->id;
-                $saleItem->product_id = $item['product']->id;
-                $saleItem->quantity = $item['quantity'];
-                $saleItem->unit_price = $item['product']->selling_price;
-                $saleItem->total_price = $item['product']->selling_price * $item['quantity'];
-                $saleItem->save();
-
-                // Update product stock and log it
-                $oldStock = $item['product']->stock_quantity;
-                $item['product']->decrement('stock_quantity', $item['quantity']);
-                $newStock = $item['product']->fresh()->stock_quantity;
-                
-                ActivityLog::logStockChange(
-                    $item['product'], 
-                    $oldStock, 
-                    $newStock, 
-                    "Vente #{$sale->sale_number}"
-                );
-                
-                Log::info('Product stock updated', [
-                    'product_id' => $item['product']->id,
-                    'product_name' => $item['product']->name,
-                    'quantity_sold' => $item['quantity'],
-                    'old_stock' => $oldStock,
-                    'new_stock' => $newStock
+            if ($validator->fails()) {
+                Log::warning('Sale creation validation failed', [
+                    'errors' => $validator->errors()->toArray(),
+                    'request_data' => $request->all()
                 ]);
+                
+                return redirect()->back()
+                    ->withErrors($validator)
+                    ->withInput();
             }
 
-            DB::commit();
+            // Validate stock availability and prepare product data
+            $productData = [];
+            foreach ($request->products as $item) {
+                $product = Product::find($item['id']);
+                if (!$product) {
+                    Log::error('Product not found', ['product_id' => $item['id']]);
+                    return redirect()->back()
+                        ->withErrors(['products' => "Produit avec l'ID {$item['id']} introuvable."])
+                        ->withInput();
+                }
+                
+                $quantity = (int) $item['quantity'];
+                if ($product->stock_quantity < $quantity) {
+                    Log::warning('Insufficient stock', [
+                        'product_id' => $product->id,
+                        'product_name' => $product->name,
+                        'available_stock' => $product->stock_quantity,
+                        'requested_quantity' => $quantity
+                    ]);
+                    return redirect()->back()
+                        ->withErrors(['products' => "Stock insuffisant pour {$product->name}. Stock disponible: {$product->stock_quantity}, demandé: {$quantity}"])
+                        ->withInput();
+                }
+                
+                $productData[] = [
+                    'product' => $product,
+                    'quantity' => $quantity
+                ];
+            }
 
-            return redirect()->route('sales.show', $sale->id)
-                ->with('success', 'Vente enregistrée avec succès!');
+            DB::beginTransaction();
+            
+            try {
+                // Create sale
+                $sale = new Sale();
+                $sale->client_id = $request->client_id;
+                $sale->user_id = auth()->id();
+                $sale->payment_method = $request->payment_method;
+                $sale->payment_status = 'paid';
+                $sale->has_prescription = $request->has('has_prescription');
+                $sale->prescription_number = $request->prescription_number;
+                $sale->discount_amount = $request->discount_amount ?? 0;
+                $sale->notes = $request->notes;
+                $sale->sale_date = now();
+                
+                // Calculate totals before saving
+                $subtotal = 0;
+                foreach ($productData as $item) {
+                    $subtotal += $item['product']->selling_price * $item['quantity'];
+                }
+                
+                $sale->subtotal = $subtotal;
+                $sale->tax_amount = $subtotal * 0.20; // 20% tax
+                $sale->total_amount = $subtotal + $sale->tax_amount - $sale->discount_amount;
+                
+                $sale->save();
+
+                Log::info('Sale created successfully', [
+                    'sale_id' => $sale->id,
+                    'sale_number' => $sale->sale_number,
+                    'total_amount' => $sale->total_amount
+                ]);
+
+                // Create sale items and update stock
+                foreach ($productData as $item) {
+                    $saleItem = new SaleItem();
+                    $saleItem->sale_id = $sale->id;
+                    $saleItem->product_id = $item['product']->id;
+                    $saleItem->quantity = $item['quantity'];
+                    $saleItem->unit_price = $item['product']->selling_price;
+                    $saleItem->total_price = $item['product']->selling_price * $item['quantity'];
+                    $saleItem->save();
+
+                    // Update product stock
+                    $oldStock = $item['product']->stock_quantity;
+                    $item['product']->decrement('stock_quantity', $item['quantity']);
+                    $newStock = $item['product']->fresh()->stock_quantity;
+                    
+                    Log::info('Product stock updated', [
+                        'product_id' => $item['product']->id,
+                        'product_name' => $item['product']->name,
+                        'quantity_sold' => $item['quantity'],
+                        'old_stock' => $oldStock,
+                        'new_stock' => $newStock
+                    ]);
+
+                    // Log stock change - only if ActivityLog class exists and has the method
+                    try {
+                        if (class_exists('App\Models\ActivityLog') && method_exists(ActivityLog::class, 'logStockChange')) {
+                            ActivityLog::logStockChange(
+                                $item['product'], 
+                                $oldStock, 
+                                $newStock, 
+                                "Vente #{$sale->sale_number}"
+                            );
+                        }
+                    } catch (\Exception $e) {
+                        Log::warning('Could not log stock change', ['error' => $e->getMessage()]);
+                    }
+                }
+
+                // Log sale creation - only if ActivityLog class exists and has the method
+                try {
+                    if (class_exists('App\Models\ActivityLog') && method_exists(ActivityLog::class, 'logTransaction')) {
+                        $clientName = $sale->client ? $sale->client->full_name : 'Client anonyme';
+                        ActivityLog::logTransaction('sale', $sale, 'create', [
+                            'client_name' => $clientName,
+                            'total_amount' => $sale->total_amount,
+                            'payment_method' => $sale->payment_method,
+                            'products_count' => count($productData)
+                        ]);
+                    }
+                } catch (\Exception $e) {
+                    Log::warning('Could not log sale transaction', ['error' => $e->getMessage()]);
+                }
+
+                DB::commit();
+
+                return redirect()->route('sales.show', $sale->id)
+                    ->with('success', 'Vente enregistrée avec succès!');
+                    
+            } catch (\Exception $e) {
+                DB::rollback();
+                
+                Log::error('Sale creation database error', [
+                    'error' => $e->getMessage(),
+                    'trace' => $e->getTraceAsString(),
+                    'request_data' => $request->all()
+                ]);
+                
+                return redirect()->back()
+                    ->withErrors(['error' => 'Erreur lors de l\'enregistrement de la vente: ' . $e->getMessage()])
+                    ->withInput();
+            }
                 
         } catch (\Exception $e) {
-            DB::rollback();
-            
-            ActivityLog::logActivity(
-                'error',
-                "Erreur lors de la création d'une vente: " . $e->getMessage(),
-                null,
-                null,
-                ['error_details' => $e->getMessage(), 'request_data' => $request->except('products')]
-            );
-            
-            Log::error('Sale creation failed', [
+            Log::error('Sale creation general error', [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
                 'request_data' => $request->all()
             ]);
             
             return redirect()->back()
-                ->withErrors(['error' => 'Erreur lors de l\'enregistrement de la vente. Veuillez réessayer.'])
+                ->withErrors(['error' => 'Erreur inattendue: ' . $e->getMessage()])
                 ->withInput();
         }
     }
@@ -293,13 +318,19 @@ class SaleController extends Controller
         $sale->notes = $request->notes;
         $sale->save();
 
-        // Log the update
-        ActivityLog::logTransaction('sale', $sale, 'update', [
-            'changes' => [
-                'payment_status' => ['old' => $oldValues['payment_status'], 'new' => $sale->payment_status],
-                'notes' => ['old' => $oldValues['notes'], 'new' => $sale->notes]
-            ]
-        ]);
+        // Log the update - only if ActivityLog exists
+        try {
+            if (class_exists('App\Models\ActivityLog') && method_exists(ActivityLog::class, 'logTransaction')) {
+                ActivityLog::logTransaction('sale', $sale, 'update', [
+                    'changes' => [
+                        'payment_status' => ['old' => $oldValues['payment_status'], 'new' => $sale->payment_status],
+                        'notes' => ['old' => $oldValues['notes'], 'new' => $sale->notes]
+                    ]
+                ]);
+            }
+        } catch (\Exception $e) {
+            Log::warning('Could not log sale update', ['error' => $e->getMessage()]);
+        }
 
         return redirect()->route('sales.show', $sale->id)
             ->with('success', 'Vente mise à jour avec succès!');
@@ -314,12 +345,6 @@ class SaleController extends Controller
         
         // Vérifier si la vente peut être supprimée
         if ($sale->sale_date < now()->subDays(7)) {
-            ActivityLog::logActivity(
-                'unauthorized_access',
-                "Tentative de suppression d'une vente de plus de 7 jours: {$sale->sale_number}",
-                $sale
-            );
-            
             return redirect()->route('sales.index')
                 ->withErrors(['error' => 'Impossible de supprimer une vente de plus de 7 jours.']);
         }
@@ -336,13 +361,6 @@ class SaleController extends Controller
                 $item->product->increment('stock_quantity', $item->quantity);
                 $newStock = $item->product->fresh()->stock_quantity;
                 
-                ActivityLog::logStockChange(
-                    $item->product,
-                    $oldStock,
-                    $newStock,
-                    "Suppression de vente #{$sale->sale_number}"
-                );
-                
                 $restoredProducts[] = [
                     'name' => $item->product->name,
                     'quantity' => $item->quantity
@@ -358,12 +376,6 @@ class SaleController extends Controller
             
             // Supprimer les items de vente
             $sale->saleItems()->delete();
-            
-            // Log deletion before actually deleting
-            ActivityLog::logTransaction('sale', $sale, 'delete', [
-                'sale_data' => $saleData,
-                'restored_products' => $restoredProducts
-            ]);
             
             // Supprimer la vente
             $sale->delete();
@@ -382,12 +394,6 @@ class SaleController extends Controller
                 
         } catch (\Exception $e) {
             DB::rollback();
-            
-            ActivityLog::logActivity(
-                'error',
-                "Erreur lors de la suppression de la vente #{$sale->sale_number}: " . $e->getMessage(),
-                $sale
-            );
             
             Log::error('Sale deletion failed', [
                 'sale_id' => $id,
@@ -426,13 +432,6 @@ class SaleController extends Controller
     public function print($id)
     {
         $sale = Sale::with(['client', 'user', 'saleItems.product'])->findOrFail($id);
-        
-        // Log print action
-        ActivityLog::logActivity(
-            'print',
-            "Impression de la facture de vente: {$sale->sale_number}",
-            $sale
-        );
         
         return view('sales.print', compact('sale'));
     }
